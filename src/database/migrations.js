@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'warhammer-character-manager';
-export const DATABASE_VERSION = 4;
+export const DATABASE_VERSION = 5;
 
 export function migrateCareerReferenceRecord(record) {
   if (!record || record.kind !== 'careers' || !Array.isArray(record.levels)) return record;
@@ -47,14 +47,29 @@ export function migrateCharacterRecord(record) {
     : {};
   return {
     ...record,
-    schemaVersion: 3,
+    schemaVersion: 4,
     identity: {
       ...identity,
-      careerLevelId: typeof identity.careerLevelId === 'string' ? identity.careerLevelId : ''
+      careerLevelId: typeof identity.careerLevelId === 'string' ? identity.careerLevelId : '',
+      speciesId: typeof identity.speciesId === 'string' ? identity.speciesId : ''
     },
     characteristics: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
       key, characteristics[key] ?? null
     ])),
+    characteristicSpeciesModifiers: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
+      key, record.characteristicSpeciesModifiers && Object.hasOwn(record.characteristicSpeciesModifiers, key)
+        ? record.characteristicSpeciesModifiers[key]
+        : 0
+    ])),
+    characteristicGeneration: record.characteristicGeneration ?? null,
+    creationWizard: {
+      step: typeof record.creationWizard?.step === 'string' ? record.creationWizard.step : 'identity',
+      // completedSteps était un historique de navigation, pas un choix
+      // explicite d'ignorer une étape. On ne le migre donc pas en skip.
+      skippedSteps: Array.isArray(record.creationWizard?.skippedSteps)
+        ? [...new Set(record.creationWizard.skippedSteps.filter((step) => ['religion', 'skills', 'talents', 'resources'].includes(step)))]
+        : []
+    },
     characteristicAdvances: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
       key, characteristicAdvances[key] ?? 0
     ])),
@@ -125,6 +140,10 @@ export function upgradeDatabase(database, transaction, oldVersion) {
   }
 
   if (oldVersion >= 3 && oldVersion < 4 && database.objectStoreNames.contains('characters')) {
+    migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
+  }
+
+  if (oldVersion >= 4 && oldVersion < 5 && database.objectStoreNames.contains('characters')) {
     migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
   }
 }

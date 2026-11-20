@@ -13,6 +13,7 @@ import {
   loadBuiltInReferenceData,
   normalizeReference,
   parseReferencePack,
+  preserveNamedMetadata,
   prepareImportedReferencePack,
   validateReferenceEntries
 } from '../src/services/reference-catalog.js';
@@ -21,7 +22,7 @@ import { upgradeDatabase, DATABASE_VERSION, migrateCareerReferenceRecord, migrat
 import { mergeBuiltInCareerLevels } from '../src/database/indexeddb.js';
 import { renderCareerLevelsEditor, renderReferenceEditor, renderReferenceManager } from '../src/views/reference-manager.js';
 
-const kinds = ['religions', 'deities', 'careers', 'species'];
+const kinds = ['religions', 'deities', 'careers', 'species', 'talents'];
 const datasets = Object.fromEntries(await Promise.all(kinds.map(async (kind) => [
   kind,
   JSON.parse(await readFile(new URL(`../data/${kind}.json`, import.meta.url), 'utf8'))
@@ -33,7 +34,7 @@ test('les référentiels initiaux sont lisibles, structurés et identifiés de f
   assert.equal(datasets.deities.entries.length, 10);
   assert.equal(datasets.careers.entries.length, 64);
   assert.equal(datasets.careers.schemaVersion, 2);
-  assert.equal(datasets.careers.version, 2);
+  assert.equal(datasets.careers.version, 3);
   assert.equal(datasets.species.entries.length, 5);
   assert.equal(datasets.species.schemaVersion, 1);
   assert.equal(datasets.species.version, 1);
@@ -41,11 +42,16 @@ test('les référentiels initiaux sont lisibles, structurés et identifiés de f
     const result = validateReferenceEntries(datasets[kind].entries.map((entry) => ({ ...entry, kind })), { existingEntries: builtins });
     assert.equal(result.valid, true, result.errors.join('; '));
   }
-  assert.ok(datasets.careers.entries.every((career) => career.levels === undefined || Array.isArray(career.levels)));
+  assert.ok(datasets.careers.entries.every((career) => Array.isArray(career.levels) && career.levels.length === 4));
+  for (const career of datasets.careers.entries) {
+    assert.deepEqual(career.levels.map((level) => level.rank), [1, 2, 3, 4]);
+    assert.deepEqual(career.levels.map((level) => level.name), ['Rang I', 'Rang II', 'Rang III', 'Rang IV']);
+    assert.ok(career.levels.every((level, index) => level.id === `${career.id}:level:${index + 1}` && level.careerId === career.id));
+  }
   assert.ok(datasets.species.entries.every((species) => Object.keys(species.characteristicModifiers).length === 10));
 });
 
-test('le chargement automatique récupère les quatre jeux JSON versionnés', async () => {
+test('le chargement automatique récupère les cinq jeux JSON versionnés', async () => {
   const originalFetch = globalThis.fetch;
   const requested = [];
   globalThis.fetch = async (url) => {
@@ -55,9 +61,10 @@ test('le chargement automatique récupère les quatre jeux JSON versionnés', as
   };
   try {
     const loaded = await loadBuiltInReferenceData();
-    assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions', 'species']);
-    assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 2);
+    assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions', 'species', 'talents']);
+    assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 3);
     assert.equal(loaded.find((dataset) => dataset.kind === 'species').version, 1);
+    assert.equal(loaded.find((dataset) => dataset.kind === 'talents').entries.length, 162);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -275,7 +282,7 @@ test('la migration IndexedDB v2 ajoute les référentiels sans supprimer le maga
   };
   const transaction = { objectStore: () => ({ openCursor() { const request = {}; queueMicrotask(() => { request.result = null; request.onsuccess?.(); }); return request; } }) };
   upgradeDatabase(database, transaction, 0);
-  assert.equal(DATABASE_VERSION, 4);
+  assert.equal(DATABASE_VERSION, 5);
   assert.ok(stores.has('characters'));
   assert.ok(stores.has('referenceEntries'));
   assert.ok(stores.has('referenceMeta'));
@@ -308,12 +315,15 @@ test('la migration v3 conserve les valeurs de personnage et ajoute les identifia
     profile: { notes: 'Notes conservées' }
   };
   const migrated = migrateCharacterRecord(oldCharacter);
-  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migrated.schemaVersion, 4);
   assert.equal(migrated.identity.careerLevel, 'Recrue');
   assert.equal(migrated.identity.careerLevelId, '');
+  assert.equal(migrated.identity.speciesId, '');
   assert.equal(migrated.profile.notes, 'Notes conservées');
   assert.deepEqual(migrated.skills, []);
   assert.equal(migrated.characteristicAdvances.CC, 0);
+  assert.equal(migrated.characteristicSpeciesModifiers.CC, 0);
+  assert.deepEqual(migrated.creationWizard, { step: 'identity', skippedSteps: [] });
   assert.equal(migrated.experience.history.length, 0);
   assert.equal(oldCharacter.identity.careerLevel, 'Recrue');
 });
@@ -325,4 +335,48 @@ test('la validation rejette les identifiants de niveau associés à une autre ca
   }]);
   assert.equal(result.valid, false);
   assert.match(result.errors.join(' '), /associé à une autre carrière/);
+});
+
+test('les référentiels de carrière conservent les métadonnées structurées des compétences et talents', () => {
+  const career = normalizeReference('careers', {
+    id: 'custom:career:scribe',
+    name: 'Scribe',
+    levels: [{
+      id: 'custom:career:scribe:level:1',
+      name: 'Apprenti',
+      rank: 1,
+      skills: [{ id: 'skill:read-write', name: 'Lire/Écrire', characteristic: 'Int', type: 'basic', advancementCost: 10, advancementCostVerified: true }],
+      talents: [{ id: 'talent:linguistics', name: 'Polyglotte', rank: 2, conditions: 'Condition documentée', description: 'Description', references: ['Livre, page de référence'] }]
+    }]
+  });
+  const level = career.levels[0];
+  assert.equal(level.skills[0].name, 'Lire/Écrire');
+  assert.equal(level.skills[0].characteristic, 'Int');
+  assert.equal(level.skills[0].skillType, 'basic');
+  assert.equal(level.skills[0].advancementCost, 10);
+  assert.equal(level.skills[0].advancementCostVerified, true);
+  assert.equal(level.talents[0].rank, 2);
+  assert.equal(level.talents[0].conditions, 'Condition documentée');
+  assert.deepEqual(level.talents[0].references, ['Livre, page de référence']);
+  assert.equal(validateReferenceEntries([career]).valid, true);
+});
+
+test('les espèces personnalisées conservent particularités, compétences typées et talents référencés', () => {
+  const species = normalizeReference('species', {
+    id: 'custom:species:nomad',
+    name: 'Nomade',
+    particularities: ['Adaptation documentée'],
+    characteristicModifiers: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [key, 10])),
+    skills: [{ id: 'skill:survival', name: 'Survie', characteristic: 'Ag', skillType: 'advanced' }],
+    talents: [{ id: 'talent:resistance', name: 'Résistance', rank: 2, conditions: 'Condition de test' }]
+  });
+  assert.deepEqual(species.particularities, ['Adaptation documentée']);
+  assert.equal(species.skills[0].characteristic, 'Ag');
+  assert.equal(species.skills[0].skillType, 'advanced');
+  assert.equal(species.talents[0].rank, 2);
+  assert.equal(validateReferenceEntries([species]).valid, true);
+  const preserved = preserveNamedMetadata(['Survie', 'Discrétion'], species.skills, 'skills');
+  assert.equal(typeof preserved[0], 'object');
+  assert.equal(preserved[0].skillType, 'advanced');
+  assert.equal(preserved[1], 'Discrétion');
 });

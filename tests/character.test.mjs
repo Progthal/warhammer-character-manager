@@ -6,7 +6,7 @@ import { renderCharacterDetail } from '../src/views/character-detail.js';
 
 test('une nouvelle fiche possède les sections attendues sans valeurs de règles inventées', () => {
   const character = createCharacter();
-  assert.equal(character.schemaVersion, 3);
+  assert.equal(character.schemaVersion, 4);
   assert.equal(character.identity.status, 'Actif');
   assert.equal(character.characteristics.CC, null);
   assert.equal(Object.keys(character.characteristics).length, 10);

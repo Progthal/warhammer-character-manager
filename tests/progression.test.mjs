@@ -43,6 +43,27 @@ test('les compétences et talents peuvent progresser avec un coût explicitement
   assert.equal(talentPurchase.experience.spent, 125);
 });
 
+test('le rang maximal documenté d’un talent bloque les achats qui le dépassent', () => {
+  const character = createCharacter({
+    experience: { total: 500, spent: 0 },
+    talents: [{ id: 'talent-limited', name: 'Talent à rang limité', rank: 2, maxRank: 3, acquired: true, status: 'acquired' }]
+  });
+  const advanced = purchaseAdvancement(character, { target: { type: 'talent', id: 'talent-limited' }, cost: 100 });
+  assert.equal(advanced.talents[0].rank, 3);
+  assert.throws(() => purchaseAdvancement(advanced, { target: { type: 'talent', id: 'talent-limited' }, cost: 100 }), /limité au rang 3/);
+  assert.equal(advanced.talents[0].rank, 3);
+});
+
+test('une suggestion sélectionnée mais non acquise ne peut pas être achetée avec des XP', () => {
+  const character = createCharacter({
+    experience: { total: 500, spent: 0 },
+    skills: [{ id: 'suggested-skill', name: 'Esquive', advances: 0, acquired: false, status: 'selected' }],
+    talents: [{ id: 'suggested-talent', name: 'Réflexes', rank: 1, acquired: false, status: 'selected' }]
+  });
+  assert.throws(() => purchaseAdvancement(character, { target: { type: 'skill', id: 'suggested-skill' }, cost: 25 }), /cible de progression/);
+  assert.throws(() => purchaseAdvancement(character, { target: { type: 'talent', id: 'suggested-talent' }, cost: 100 }), /cible de progression/);
+});
+
 test('un achat refusé faute de XP ne modifie pas la fiche d’origine', () => {
   const character = createCharacter({ experience: { total: 50, spent: 40 } });
   assert.throws(() => purchaseAdvancement(character, {

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'wcm-shell-';
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v14';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './assets/icons/icon-512.png',
   './src/app.js',
   './src/components/reference-picker.js',
+  './src/components/talent-picker.js',
   './src/router.js',
   './src/models/character.js',
   './src/rules/characteristic-generator.js',
@@ -21,6 +22,8 @@ const APP_SHELL = [
   './src/services/progression.js',
   './src/services/theme.js',
   './src/services/reference-catalog.js',
+  './src/services/talents.js',
+  './src/services/creation-wizard.js',
   './src/utils/format.js',
   './src/views/dashboard.js',
   './src/views/character-detail.js',
@@ -28,7 +31,8 @@ const APP_SHELL = [
   './data/religions.json',
   './data/deities.json',
   './data/careers.json',
-  './data/species.json'
+  './data/species.json',
+  './data/talents.json'
 ];
 
 self.addEventListener('install', (event) => {

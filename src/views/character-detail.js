@@ -49,6 +49,7 @@ export function renderCharacterDetail(character, referenceEntries = []) {
     return `<tr>
       <th scope="row"><abbr title="${escapeHTML(label)}">${escapeHTML(shortLabel)}</abbr><span>${escapeHTML(label)}</span></th>
       <td>${valueOrDash(stat.initial)}</td>
+      <td>${stat.speciesBonus > 0 ? '+' : ''}${stat.speciesBonus}</td>
       <td>${stat.talentBonus > 0 ? '+' : ''}${stat.talentBonus}</td>
       <td>${stat.advances > 0 ? '+' : ''}${stat.advances}</td>
       <td class="calculated-value">${valueOrDash(stat.current)}</td>
@@ -57,7 +58,7 @@ export function renderCharacterDetail(character, referenceEntries = []) {
     </tr>`;
   }).join('');
   const skillRows = calculated.skills.map((skill) => `<tr>
-    <th scope="row">${escapeHTML(skill.name)}${skill.career ? '<span class="table-tag">Carrière</span>' : ''}</th>
+    <th scope="row">${escapeHTML(skill.name)}${skill.skillType === 'basic' ? '<span class="table-tag">Base</span>' : skill.skillType === 'advanced' ? '<span class="table-tag">Avancée</span>' : ''}${skill.career ? '<span class="table-tag">Carrière</span>' : ''}${skill.acquired === false ? '<span class="table-tag">À confirmer</span>' : ''}</th>
     <td>${escapeHTML(skill.characteristicLabel)}</td><td>${valueOrDash(skill.base)}</td>
     <td>${skill.advances > 0 ? '+' : ''}${skill.advances}</td><td class="calculated-value">${valueOrDash(skill.total)}</td>
     <td>${skill.advancementCost ? `<button class="table-action" type="button" data-action="purchase-advancement" data-character-id="${escapeHTML(character.id)}" data-target-type="skill" data-target-id="${escapeHTML(skill.id)}" data-cost="${escapeHTML(skill.advancementCost)}">+1 · ${escapeHTML(skill.advancementCost)} XP</button>` : '<span class="muted-copy">Coût à configurer</span>'}</td>
@@ -66,7 +67,15 @@ export function renderCharacterDetail(character, referenceEntries = []) {
     const verifiedEffects = (talent.effects || []).filter((effect) => effect.verified && effect.reference?.trim() && effect.type === 'characteristicBonus');
     const effects = verifiedEffects.map((effect) => `+${effect.value} ${effect.characteristic}`).join(' · ');
     return `<article class="collection-card"><div><h3>${escapeHTML(talent.name)}</h3><span class="collection-rank">Rang ${escapeHTML(talent.rank)}</span></div>
+      ${talent.nameOriginal && talent.nameOriginal !== talent.name ? `<small class="muted-copy">Nom original : ${escapeHTML(talent.nameOriginal)}</small>` : ''}
+      ${talent.acquired === false ? '<small class="muted-copy">Sélectionné · acquisition à confirmer</small>' : ''}
+      ${talent.category ? `<small class="muted-copy">Catégorie : ${escapeHTML(talent.category)}</small>` : ''}
+      ${talent.tests?.length ? `<small class="muted-copy">Tests : ${escapeHTML(talent.tests.join(' · '))}</small>` : ''}
+      ${talent.skills?.length ? `<small class="muted-copy">Compétences : ${escapeHTML(talent.skills.join(' · '))}</small>` : ''}
+      ${talent.conditions ? `<p class="collection-description">Conditions : ${escapeHTML(talent.conditions)}</p>` : ''}
       ${talent.description ? `<p>${escapeHTML(talent.description)}</p>` : '<p class="muted-copy">Aucune description renseignée.</p>'}
+      ${(talent.references || []).length ? `<small class="muted-copy">Références : ${escapeHTML(talent.references.join(' · '))}</small>` : ''}
+      ${talent.sourceInfo?.title ? `<small class="muted-copy">Source : ${escapeHTML([talent.sourceInfo.title, talent.sourceInfo.publisher, talent.sourceInfo.page ? `p. ${talent.sourceInfo.page}` : ''].filter(Boolean).join(' · '))}</small>` : ''}
       ${effects ? `<small class="verified-effect">Effet vérifié : ${escapeHTML(effects)}</small>` : '<small class="muted-copy">Aucun effet mécanique vérifié configuré.</small>'}
       ${talent.advancementCost ? `<button class="table-action" type="button" data-action="purchase-advancement" data-character-id="${escapeHTML(character.id)}" data-target-type="talent" data-target-id="${escapeHTML(talent.id)}" data-cost="${escapeHTML(talent.advancementCost)}">Acheter le rang suivant · ${escapeHTML(talent.advancementCost)} XP</button>` : '<small class="muted-copy">Coût à configurer pour progresser.</small>'}
     </article>`;
@@ -124,8 +133,8 @@ export function renderCharacterDetail(character, referenceEntries = []) {
       ${careerLevelSection(identity, referenceEntries)}
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">CARACTÉRISTIQUES</div><h2>Caractéristiques principales</h2></div><span class="section-caption">Valeurs actuelles calculées</span></div>
-        <div class="responsive-table"><table class="data-table characteristic-data-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Talents</th><th>Augmentations</th><th>Actuelle</th><th>Bonus</th><th>Progression</th></tr></thead><tbody>${characteristicRows}</tbody></table></div>
-        <p class="form-hint">Le bonus est le chiffre des dizaines de la valeur actuelle. Un effet de talent doit être structuré, marqué comme vérifié et accompagné de sa référence pour être appliqué.</p>
+        <div class="responsive-table"><table class="data-table characteristic-data-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augmentations</th><th>Actuelle</th><th>Bonus</th><th>Progression</th></tr></thead><tbody>${characteristicRows}</tbody></table></div>
+        <p class="form-hint">Le bonus est le chiffre des dizaines de la valeur actuelle. Les modificateurs d’espèce sont conservés séparément des jets. Un effet de talent doit être structuré, marqué comme vérifié et accompagné de sa référence pour être appliqué.</p>
       </section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">COMPÉTENCES</div><h2>Compétences du personnage</h2></div><span class="section-caption">${calculated.skills.length} compétence(s)</span></div>
@@ -137,8 +146,8 @@ export function renderCharacterDetail(character, referenceEntries = []) {
       </section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">RÉSISTANCE ET RESSOURCES</div><h2>Caractéristiques secondaires</h2></div></div><div class="detail-grid detail-grid-small">
-        ${detailBlock('Mouvement', valueOrDash(secondary.movement))}${detailBlock('Blessures', `${valueOrDash(secondary.woundsCurrent)} / ${valueOrDash(secondary.woundsMax)}`)}${detailBlock('Résistance', valueOrDash(secondary.resistance))}${detailBlock('Bonus de Force', valueOrDash(secondary.strengthBonus))}${detailBlock('Bonus d’Endurance', valueOrDash(secondary.enduranceBonus))}${detailBlock('Points de destin', valueOrDash(secondary.fate))}${detailBlock('Points de chance', valueOrDash(secondary.fortune))}${detailBlock('Résilience', valueOrDash(secondary.resilience))}${detailBlock('Motivation', valueOrDash(secondary.resolve))}
-      </div><p class="form-hint">Mouvement et blessures maximales restent des valeurs saisies manuellement tant qu’une formule propre à l’espèce n’a pas été configurée et vérifiée.</p></section>
+        ${detailBlock('Mouvement', valueOrDash(calculated.secondary.movement))}${detailBlock('Blessures', `${valueOrDash(calculated.secondary.woundsCurrent)} / ${valueOrDash(calculated.secondary.woundsMax)}`)}${detailBlock('Résistance', valueOrDash(calculated.secondary.resistance))}${detailBlock('Bonus de Force', valueOrDash(calculated.secondary.strengthBonus))}${detailBlock('Bonus d’Endurance', valueOrDash(calculated.secondary.enduranceBonus))}${detailBlock('Points de destin', valueOrDash(calculated.secondary.fate))}${detailBlock('Points de chance', valueOrDash(calculated.secondary.fortune))}${detailBlock('Résilience', valueOrDash(calculated.secondary.resilience))}${detailBlock('Motivation', valueOrDash(calculated.secondary.resolve))}
+      </div><p class="form-hint">Le bonus de Force et le bonus d’Endurance sont dérivés du chiffre des dizaines de F et E. Mouvement et blessures maximales restent des valeurs saisies manuellement tant qu’une formule propre à l’espèce n’a pas été configurée et vérifiée.</p></section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">ÉQUIPEMENT</div><h2>Armes, armures et possessions</h2></div><span class="section-caption">Encombrement : ${encumbrance.total.toLocaleString('fr-FR')}</span></div>
         <div class="resource-status ${encumbrance.overloaded ? 'resource-warning' : ''}"><strong>${escapeHTML(encumbranceStatus)}</strong><span>${encumbrance.capacity === null ? 'Définissez la capacité dans les paramètres de la fiche.' : `${encumbrance.remaining.toLocaleString('fr-FR')} point(s) restant(s) sur ${encumbrance.capacity}.`}</span></div>

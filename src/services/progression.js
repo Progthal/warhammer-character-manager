@@ -20,7 +20,7 @@ function locateProgressionTarget(character, target) {
   }
   if (target?.type === 'skill') {
     const entry = character.skills.find((item) => item.id === target.id);
-    if (entry) return {
+    if (entry && entry.acquired !== false && entry.status !== 'selected' && entry.status !== 'suggested') return {
       path: `skills.${entry.id}.advances`,
       get: () => entry.advances || 0,
       set: (value) => { entry.advances = value; }
@@ -28,7 +28,7 @@ function locateProgressionTarget(character, target) {
   }
   if (target?.type === 'talent') {
     const entry = character.talents.find((item) => item.id === target.id);
-    if (entry) return {
+    if (entry && entry.acquired !== false && entry.status !== 'selected' && entry.status !== 'suggested') return {
       path: `talents.${entry.id}.rank`,
       get: () => entry.rank || 1,
       set: (value) => { entry.rank = value; }
@@ -64,6 +64,12 @@ export function purchaseAdvancement(input, { target, amount = 1, cost, note = ''
   const progression = locateProgressionTarget(character, target);
   const previousValue = progression.get();
   const newValue = previousValue + increments;
+  if (target?.type === 'talent') {
+    const talent = character.talents.find((item) => item.id === target.id);
+    if (talent?.maxRank && newValue > talent.maxRank) {
+      throw new RangeError(`Le talent « ${talent.name} » est limité au rang ${talent.maxRank}.`);
+    }
+  }
   progression.set(newValue);
   character.experience.spent += price;
   character.experience.history.push({

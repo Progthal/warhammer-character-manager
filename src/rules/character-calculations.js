@@ -19,6 +19,7 @@ export function calculateCharacteristics(character) {
 
   for (const { key, label, shortLabel } of CHARACTERISTICS) {
     const initial = finiteOrNull(character?.characteristics?.[key]);
+    const speciesBonus = finiteOrNull(character?.characteristicSpeciesModifiers?.[key]);
     const advances = Math.max(0, finiteOrNull(character?.characteristicAdvances?.[key]) ?? 0);
     const talentBonus = talents.reduce((total, talent) => {
       const effects = Array.isArray(talent?.effects) ? talent.effects : [];
@@ -27,12 +28,13 @@ export function calculateCharacteristics(character) {
         return sum + (finiteOrNull(effect.value) ?? 0);
       }, 0);
     }, 0);
-    const current = initial === null ? null : initial + advances + talentBonus;
+    const current = initial === null || speciesBonus === null ? null : initial + speciesBonus + advances + talentBonus;
     result[key] = {
       key,
       label,
       shortLabel,
       initial,
+      speciesBonus,
       talentBonus,
       advances,
       current,
@@ -92,6 +94,29 @@ export function evaluateCorruption(character) {
   };
 }
 
+export function calculateSecondaryCharacteristics(character, characteristicValues = calculateCharacteristics(character)) {
+  const manual = character?.secondary || {};
+  const strengthBonus = characteristicValues.F?.bonus;
+  const enduranceBonus = characteristicValues.E?.bonus;
+  return {
+    movement: finiteOrNull(manual.movement),
+    woundsCurrent: finiteOrNull(manual.woundsCurrent),
+    woundsMax: finiteOrNull(manual.woundsMax),
+    resistance: finiteOrNull(manual.resistance),
+    strengthBonus: strengthBonus ?? finiteOrNull(manual.strengthBonus),
+    enduranceBonus: enduranceBonus ?? finiteOrNull(manual.enduranceBonus),
+    fate: finiteOrNull(manual.fate),
+    fortune: finiteOrNull(manual.fortune),
+    resilience: finiteOrNull(manual.resilience),
+    resolve: finiteOrNull(manual.resolve),
+    derived: {
+      strengthBonus: strengthBonus !== null,
+      enduranceBonus: enduranceBonus !== null
+    },
+    woundsConfigured: finiteOrNull(manual.woundsMax) !== null
+  };
+}
+
 export function calculateCharacterSheet(character) {
   const characteristics = calculateCharacteristics(character);
   return {
@@ -99,11 +124,6 @@ export function calculateCharacterSheet(character) {
     skills: calculateSkills(character, characteristics),
     encumbrance: calculateEncumbrance(character),
     corruption: evaluateCorruption(character),
-    secondary: {
-      movement: finiteOrNull(character?.secondary?.movement),
-      woundsCurrent: finiteOrNull(character?.secondary?.woundsCurrent),
-      woundsMax: finiteOrNull(character?.secondary?.woundsMax),
-      woundsConfigured: finiteOrNull(character?.secondary?.woundsMax) !== null
-    }
+    secondary: calculateSecondaryCharacteristics(character, characteristics)
   };
 }

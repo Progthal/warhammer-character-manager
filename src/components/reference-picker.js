@@ -146,10 +146,6 @@ export function mountReferencePickers(root, catalog, { onChange = () => true } =
     picker.input.value = entry?.name || '';
     closeList(picker);
     refreshInfo(picker);
-    if (notify) {
-      picker.idInput.dispatchEvent(new Event('change', { bubbles: true }));
-      picker.valueInput.dispatchEvent(new Event('change', { bubbles: true }));
-    }
     if (notify && onChange(kind, entry || null, previous.entry || null) === false) {
       picker.selected = previous.entry;
       picker.idInput.value = previous.id;
@@ -158,6 +154,13 @@ export function mountReferencePickers(root, catalog, { onChange = () => true } =
       picker.input.value = previous.entry?.name || '';
       refreshInfo(picker);
       return false;
+    }
+    // N'annoncer la nouvelle valeur au formulaire qu'après acceptation du
+    // changement métier. Sinon les écouteurs input/change synchronisent le
+    // modèle et la progression avec une sélection ensuite refusée et annulée.
+    if (notify) {
+      picker.idInput.dispatchEvent(new Event('change', { bubbles: true }));
+      picker.valueInput.dispatchEvent(new Event('change', { bubbles: true }));
     }
     return true;
   }

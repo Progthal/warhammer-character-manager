@@ -6,13 +6,14 @@ import {
 } from '../database/indexeddb.js';
 import { createId } from '../models/character.js';
 
-export const REFERENCE_KINDS = Object.freeze(['religions', 'deities', 'careers', 'species']);
+export const REFERENCE_KINDS = Object.freeze(['religions', 'deities', 'careers', 'species', 'talents']);
 export const REFERENCE_APP = 'warhammer-character-manager';
 export const REFERENCE_FORMAT_VERSION = 1;
 export const MAX_REFERENCE_IMPORT_SIZE = 10 * 1024 * 1024;
 
-const KIND_SINGULAR = { religions: 'religion', deities: 'deity', careers: 'career', species: 'species' };
+const KIND_SINGULAR = { religions: 'religion', deities: 'deity', careers: 'career', species: 'species', talents: 'talent' };
 const CHARACTERISTIC_KEYS = ['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'];
+const CHARACTERISTIC_KEY_SET = new Set(CHARACTERISTIC_KEYS);
 const TEXT_LIMIT = 5000;
 const now = () => new Date().toISOString();
 const CAREER_LEVEL_LIST_FIELDS = [
@@ -34,6 +35,155 @@ function cleanIdList(value) {
   return [...new Set(value.filter((item) => typeof item === 'string' && item.length > 0 && item.length <= 180))].slice(0, 200);
 }
 
+function normalizeSkillKind(value) {
+  const normalized = cleanText(value, 40).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr-FR');
+  if (normalized.includes('basic') || normalized.includes('base')) return 'basic';
+  if (normalized.includes('advanced') || normalized.includes('avancee')) return 'advanced';
+  return '';
+}
+
+function cleanNamedList(value, kind = 'skills', limit = 100) {
+  if (!Array.isArray(value)) return [];
+  const entries = [];
+  const seen = new Set();
+  for (const item of value.slice(0, limit)) {
+    if (typeof item === 'string') {
+      const name = cleanText(item, 300);
+      const key = name.toLocaleLowerCase('fr-FR');
+      if (name && !seen.has(key)) { entries.push(name); seen.add(key); }
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const name = cleanText(item.name, 300);
+    const key = name.toLocaleLowerCase('fr-FR');
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    const reference = {
+      id: cleanText(item.id || item.referenceId, 180),
+      name
+    };
+    if (kind === 'skills') {
+      const characteristic = cleanText(item.characteristic || item.characteristicKey, 8);
+      const type = normalizeSkillKind(item.skillType || item.type || item.category);
+      const baseValue = item.baseValue === null || item.baseValue === undefined || item.baseValue === '' ? null : Number(item.baseValue);
+      const advancementCost = item.advancementCost === null || item.advancementCost === undefined || item.advancementCost === '' ? null : Number(item.advancementCost);
+      if (CHARACTERISTIC_KEY_SET.has(characteristic)) reference.characteristic = characteristic;
+      if (type) reference.skillType = type;
+      if (Number.isFinite(baseValue) && item.baseValueVerified === true) {
+        reference.baseValue = baseValue;
+        reference.baseValueVerified = true;
+      }
+      if (Number.isFinite(advancementCost) && advancementCost > 0 && item.advancementCostVerified === true) {
+        reference.advancementCost = advancementCost;
+        reference.advancementCostVerified = true;
+      }
+      reference.useCharacteristicBase = item.useCharacteristicBase !== false;
+      reference.description = cleanText(item.description, TEXT_LIMIT);
+      reference.references = cleanList(item.references, 20);
+    } else {
+      const rank = Number(item.rank);
+      const advancementCost = item.advancementCost === null || item.advancementCost === undefined || item.advancementCost === '' ? null : Number(item.advancementCost);
+      reference.rank = Number.isInteger(rank) && rank > 0 ? Math.min(rank, 999) : 1;
+      reference.description = cleanText(item.description, TEXT_LIMIT);
+      reference.conditions = cleanText(item.conditions || item.acquisitionConditions, TEXT_LIMIT);
+      if (Number.isFinite(advancementCost) && advancementCost > 0 && item.advancementCostVerified === true) {
+        reference.advancementCost = advancementCost;
+        reference.advancementCostVerified = true;
+      }
+      reference.references = cleanList(item.references, 20);
+      reference.effects = Array.isArray(item.effects) ? item.effects.slice(0, 20).filter((effect) => effect && typeof effect === 'object' && !Array.isArray(effect)).map((effect) => ({
+        type: cleanText(effect.type, 40),
+        characteristic: CHARACTERISTIC_KEY_SET.has(effect.characteristic) ? effect.characteristic : '',
+        value: Number.isFinite(Number(effect.value)) ? Number(effect.value) : 0,
+        verified: effect.verified === true,
+        reference: cleanText(effect.reference, 500)
+      })) : [];
+    }
+    if (reference.id) reference.referenceId = reference.id;
+    entries.push(reference);
+  }
+  return entries;
+}
+
+function cleanTalentEffects(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).filter((effect) => effect && typeof effect === 'object' && !Array.isArray(effect)).map((effect) => ({
+    type: cleanText(effect.type, 50) || 'none',
+    characteristic: CHARACTERISTIC_KEY_SET.has(effect.characteristic) ? effect.characteristic : '',
+    skillId: cleanText(effect.skillId, 180),
+    skillName: cleanText(effect.skillName, 160),
+    value: Number.isFinite(Number(effect.value)) ? Number(effect.value) : null,
+    condition: cleanText(effect.condition, 1000),
+    verified: effect.verified === true,
+    reference: cleanText(effect.reference, 500)
+  }));
+}
+
+function normalizeTalentReference(input, common, source) {
+  const maxRank = input?.max_rank ?? input?.maxRank;
+  const normalizedMaxRank = maxRank === '' || maxRank === null || maxRank === undefined
+    ? null
+    : Number(maxRank);
+  const verification = cleanText(input?.verification_status || input?.verificationStatus, 40);
+  const availability = cleanText(input?.availability, 40);
+  const sourceInfo = input?.source_info || input?.sourceInfo;
+  const sourceRecord = sourceInfo && typeof sourceInfo === 'object' && !Array.isArray(sourceInfo) ? sourceInfo : {};
+  return {
+    ...common,
+    name_fr: cleanText(input?.name_fr || input?.nameFr, 160),
+    name_original: cleanText(input?.name_original || input?.nameOriginal, 160),
+    aliases: cleanList(input?.aliases, 100),
+    category: cleanText(input?.category, 120),
+    tests: cleanList(input?.tests, 30),
+    skills: cleanList(input?.skills, 50),
+    maxRank: Number.isInteger(normalizedMaxRank) && normalizedMaxRank > 0 ? Math.min(normalizedMaxRank, 999) : null,
+    effects: cleanTalentEffects(input?.effects),
+    prerequisites: cleanList(input?.prerequisites, 50),
+    species: cleanIdList(input?.species),
+    careerIds: cleanIdList(input?.career_ids || input?.careerIds),
+    careerLevelIds: cleanIdList(input?.career_level_ids || input?.careerLevelIds),
+    availability: ['available', 'restricted', 'unavailable', 'unknown'].includes(availability) ? availability : 'unknown',
+    verificationStatus: ['verified', 'incomplete', 'community', 'custom'].includes(verification) ? verification : (source === 'custom' ? 'custom' : 'incomplete'),
+    sourceInfo: {
+      title: cleanText(sourceRecord.title, 240),
+      publisher: cleanText(sourceRecord.publisher, 160),
+      page: cleanText(sourceRecord.page, 80),
+      url: cleanText(sourceRecord.url, 1000),
+      note: cleanText(sourceRecord.note, TEXT_LIMIT)
+    },
+    custom: source === 'custom' || input?.custom === true
+  };
+}
+
+export function preserveNamedMetadata(lines, previous, kind = 'skills') {
+  const oldItems = Array.isArray(previous) ? previous : [];
+  const byName = new Map(oldItems.map((item) => [
+    (typeof item === 'string' ? item : item?.name || '').trim().toLocaleLowerCase('fr-FR'), item
+  ]));
+  return lines.map((line) => byName.get(line.trim().toLocaleLowerCase('fr-FR')) || line);
+}
+
+function isValidNamedEntry(value, kind) {
+  if (typeof value === 'string') return value.trim().length > 0 && value.length <= 300;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 300) return false;
+  if (kind === 'skills') {
+    const characteristic = value.characteristic || value.characteristicKey;
+    if (characteristic !== undefined && !CHARACTERISTIC_KEY_SET.has(characteristic)) return false;
+    const type = value.skillType || value.type || value.category;
+    if (type !== undefined && !normalizeSkillKind(type)) return false;
+    if (value.baseValue !== undefined && value.baseValue !== null && !Number.isFinite(Number(value.baseValue))) return false;
+    if (value.baseValueVerified !== undefined && typeof value.baseValueVerified !== 'boolean') return false;
+    if (value.advancementCost !== undefined && value.advancementCost !== null && !Number.isFinite(Number(value.advancementCost))) return false;
+    if (value.advancementCostVerified !== undefined && typeof value.advancementCostVerified !== 'boolean') return false;
+    return true;
+  }
+  if (value.rank !== undefined && (!Number.isInteger(Number(value.rank)) || Number(value.rank) < 1 || Number(value.rank) > 999)) return false;
+  if (value.advancementCost !== undefined && value.advancementCost !== null && !Number.isFinite(Number(value.advancementCost))) return false;
+  if (value.advancementCostVerified !== undefined && typeof value.advancementCostVerified !== 'boolean') return false;
+  return true;
+}
+
 function normalizeCareerLevel(careerId, input, index) {
   const raw = typeof input === 'string' ? { name: input } : input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const fallbackRank = index + 1;
@@ -46,9 +196,9 @@ function normalizeCareerLevel(careerId, input, index) {
     name: cleanText(raw.name, 160),
     rank,
     description: cleanText(raw.description, TEXT_LIMIT),
-    skills: cleanList(raw.skills),
+    skills: cleanNamedList(raw.skills, 'skills'),
     skillIds: cleanIdList(raw.skillIds),
-    talents: cleanList(raw.talents),
+    talents: cleanNamedList(raw.talents, 'talents'),
     talentIds: cleanIdList(raw.talentIds),
     advancements: cleanList(raw.advancements),
     entryConditions: cleanList(raw.entryConditions),
@@ -119,6 +269,11 @@ export function normalizeReference(kind, input, options = {}) {
     return {
       ...common,
       aliases: cleanList(input?.aliases),
+      particularities: cleanList(input?.particularities),
+      skills: cleanNamedList(input?.skills, 'skills'),
+      skillIds: cleanIdList(input?.skillIds),
+      talents: cleanNamedList(input?.talents, 'talents'),
+      talentIds: cleanIdList(input?.talentIds),
       customized: source === 'builtin' && Boolean(input?.customized),
       characteristicModifiers: Object.fromEntries(CHARACTERISTIC_KEYS.map((key) => {
         const value = modifiers[key];
@@ -127,13 +282,14 @@ export function normalizeReference(kind, input, options = {}) {
       }))
     };
   }
+  if (kind === 'talents') return normalizeTalentReference(input, common, source);
   return {
     ...common,
     className: cleanText(input?.className, 120),
     levels: normalizeCareerLevels(input?.levels, common.id),
-    skills: cleanList(input?.skills),
+    skills: cleanNamedList(input?.skills, 'skills'),
     skillIds: cleanIdList(input?.skillIds),
-    talents: cleanList(input?.talents),
+    talents: cleanNamedList(input?.talents, 'talents'),
     talentIds: cleanIdList(input?.talentIds),
     advancements: cleanList(input?.advancements),
     entryConditions: cleanList(input?.entryConditions),
@@ -177,14 +333,37 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
       : entry.kind === 'deities'
         ? ['religionIds', 'domains', 'symbols']
         : entry.kind === 'species'
-          ? ['aliases']
-          : ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
+          ? ['aliases', 'particularities', 'skills', 'skillIds', 'talents', 'talentIds']
+          : entry.kind === 'talents'
+            ? ['aliases', 'tests', 'skills', 'prerequisites', 'species', 'career_ids', 'career_level_ids', 'careerIds', 'careerLevelIds']
+            : ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
     for (const field of listFields) {
-      if (entry[field] !== undefined && (!Array.isArray(entry[field]) || entry[field].some((value) => typeof value !== 'string'))) {
+      const namedKind = field === 'skills' ? 'skills' : field === 'talents' ? 'talents' : '';
+      if (entry[field] !== undefined && (!Array.isArray(entry[field]) || entry[field].some((value) => namedKind ? !isValidNamedEntry(value, namedKind) : typeof value !== 'string'))) {
         errors.push(`${location} : champ « ${field} » invalide.`);
       }
     }
     if (entry.description !== undefined && typeof entry.description !== 'string') errors.push(`${location} : description invalide.`);
+    if (entry.kind === 'talents') {
+      const maxRank = entry.max_rank ?? entry.maxRank;
+      if (maxRank !== undefined && maxRank !== null && maxRank !== '' && (!Number.isInteger(Number(maxRank)) || Number(maxRank) < 1 || Number(maxRank) > 999)) {
+        errors.push(`${location} : rang maximal invalide.`);
+      }
+      const verification = entry.verification_status || entry.verificationStatus;
+      if (verification !== undefined && !['verified', 'incomplete', 'community', 'custom'].includes(verification)) {
+        errors.push(`${location} : statut de vérification inconnu.`);
+      }
+      if (entry.availability !== undefined && !['available', 'restricted', 'unavailable', 'unknown'].includes(entry.availability)) {
+        errors.push(`${location} : disponibilité inconnue.`);
+      }
+      const effects = entry.effects ?? [];
+      if (!Array.isArray(effects) || effects.length > 30 || effects.some((effect) => !effect || typeof effect !== 'object' || Array.isArray(effect))) {
+        errors.push(`${location} : effets invalides.`);
+      }
+      for (const field of ['name_fr', 'name_original', 'category']) {
+        if (entry[field] !== undefined && typeof entry[field] !== 'string') errors.push(`${location} : champ « ${field} » invalide.`);
+      }
+    }
     if (entry.kind === 'species' && entry.characteristicModifiers !== undefined) {
       if (!entry.characteristicModifiers || typeof entry.characteristicModifiers !== 'object' || Array.isArray(entry.characteristicModifiers)) {
         errors.push(`${location} : modificateurs de caractéristiques invalides.`);
@@ -224,7 +403,8 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
             errors.push(`${location}, niveau ${levelIndex + 1} : rang invalide.`);
           }
           for (const field of CAREER_LEVEL_LIST_FIELDS) {
-            if (level[field] !== undefined && (!Array.isArray(level[field]) || level[field].some((value) => typeof value !== 'string'))) {
+            const namedKind = field === 'skills' ? 'skills' : field === 'talents' ? 'talents' : '';
+            if (level[field] !== undefined && (!Array.isArray(level[field]) || level[field].some((value) => namedKind ? !isValidNamedEntry(value, namedKind) : typeof value !== 'string'))) {
               errors.push(`${location}, niveau ${levelIndex + 1} : champ « ${field} » invalide.`);
             }
           }

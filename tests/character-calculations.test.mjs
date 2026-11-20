@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCharacter } from '../src/models/character.js';
 import {
-  calculateCharacterSheet, calculateCharacteristics, calculateEncumbrance, calculateSkills, evaluateCorruption
+  calculateCharacterSheet, calculateCharacteristics, calculateEncumbrance, calculateSecondaryCharacteristics, calculateSkills, evaluateCorruption
 } from '../src/rules/character-calculations.js';
 
 test('les caractéristiques séparent valeur initiale, talents vérifiés, augmentations et bonus des dizaines', () => {
@@ -21,10 +21,54 @@ test('les caractéristiques séparent valeur initiale, talents vérifiés, augme
   const result = calculateCharacteristics(character);
   assert.deepEqual(result.CC, {
     key: 'CC', label: 'Capacité de Combat', shortLabel: 'CC',
-    initial: 38, talentBonus: 2, advances: 4, current: 44, bonus: 4
+    initial: 38, speciesBonus: 0, talentBonus: 2, advances: 4, current: 44, bonus: 4
   });
   assert.equal(result.CT.current, null);
   assert.equal(result.CT.bonus, null);
+});
+
+test('le modificateur d’espèce est additionné séparément du jet et des autres bonus', () => {
+  const character = createCharacter({
+    characteristics: { CC: 32 },
+    characteristicSpeciesModifiers: { CC: 20 },
+    characteristicAdvances: { CC: 3 }
+  });
+  const stat = calculateCharacteristics(character).CC;
+  assert.equal(stat.initial, 32);
+  assert.equal(stat.speciesBonus, 20);
+  assert.equal(stat.advances, 3);
+  assert.equal(stat.current, 55);
+  assert.equal(stat.bonus, 5);
+});
+
+test('les bonus de Force et d’Endurance sont centralisés et les autres ressources restent manuelles', () => {
+  const character = createCharacter({
+    characteristics: { F: 37, E: 48 },
+    secondary: { strengthBonus: 1, enduranceBonus: 2, movement: 4, woundsMax: 12 }
+  });
+  const secondary = calculateSecondaryCharacteristics(character);
+  assert.equal(secondary.strengthBonus, 3);
+  assert.equal(secondary.enduranceBonus, 4);
+  assert.equal(secondary.derived.strengthBonus, true);
+  assert.equal(secondary.derived.enduranceBonus, true);
+  assert.equal(secondary.movement, 4);
+  assert.equal(secondary.woundsMax, 12);
+
+  const manualFallback = calculateSecondaryCharacteristics(createCharacter({ secondary: { strengthBonus: 2, enduranceBonus: 3 } }));
+  assert.equal(manualFallback.strengthBonus, 2);
+  assert.equal(manualFallback.enduranceBonus, 3);
+  assert.equal(manualFallback.derived.strengthBonus, false);
+});
+
+test('un modificateur d’espèce absent ne devient pas silencieusement un bonus nul', () => {
+  const character = createCharacter({
+    characteristics: { CC: 35 },
+    characteristicSpeciesModifiers: { CC: null }
+  });
+  const stat = calculateCharacteristics(character).CC;
+  assert.equal(stat.speciesBonus, null);
+  assert.equal(stat.current, null);
+  assert.equal(stat.bonus, null);
 });
 
 test('les compétences utilisent la caractéristique associée ou une base manuelle explicite', () => {
