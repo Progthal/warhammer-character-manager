@@ -14,6 +14,10 @@ export const MAX_REFERENCE_IMPORT_SIZE = 10 * 1024 * 1024;
 const KIND_SINGULAR = { religions: 'religion', deities: 'deity', careers: 'career' };
 const TEXT_LIMIT = 5000;
 const now = () => new Date().toISOString();
+const CAREER_LEVEL_LIST_FIELDS = [
+  'skills', 'skillIds', 'talents', 'talentIds', 'advancements',
+  'entryConditions', 'exitConditions', 'equipment', 'references'
+];
 
 function cleanText(value, limit = 500) {
   return typeof value === 'string' ? value.trim().slice(0, limit) : '';
@@ -27,6 +31,51 @@ function cleanList(value, limit = 100) {
 function cleanIdList(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((item) => typeof item === 'string' && item.length > 0 && item.length <= 180))].slice(0, 200);
+}
+
+function normalizeCareerLevel(careerId, input, index) {
+  const raw = typeof input === 'string' ? { name: input } : input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const fallbackRank = index + 1;
+  const rankValue = Number(raw.rank);
+  const rank = Number.isInteger(rankValue) && rankValue > 0 ? Math.min(rankValue, 99) : fallbackRank;
+  const levelId = cleanText(raw.id, 180) || `${careerId}:level:${fallbackRank}`;
+  return {
+    id: levelId,
+    careerId,
+    name: cleanText(raw.name, 160),
+    rank,
+    description: cleanText(raw.description, TEXT_LIMIT),
+    skills: cleanList(raw.skills),
+    skillIds: cleanIdList(raw.skillIds),
+    talents: cleanList(raw.talents),
+    talentIds: cleanIdList(raw.talentIds),
+    advancements: cleanList(raw.advancements),
+    entryConditions: cleanList(raw.entryConditions),
+    exitConditions: cleanList(raw.exitConditions),
+    equipment: cleanList(raw.equipment),
+    additionalInformation: cleanText(raw.additionalInformation, TEXT_LIMIT),
+    references: cleanList(raw.references)
+  };
+}
+
+export function createCareerLevel(careerId, rank = 1) {
+  return normalizeCareerLevel(careerId, {
+    id: `career-level:${createId()}`,
+    careerId,
+    name: '',
+    rank
+  }, rank - 1);
+}
+
+function normalizeCareerLevels(levels, careerId) {
+  if (!Array.isArray(levels)) return [];
+  const seen = new Set();
+  return levels.map((level, index) => {
+    const normalized = normalizeCareerLevel(careerId, level, index);
+    if (seen.has(normalized.id)) normalized.id = `${careerId}:level:${index + 1}`;
+    seen.add(normalized.id);
+    return normalized;
+  }).sort((a, b) => a.rank - b.rank);
 }
 
 export function normalizeReference(kind, input, options = {}) {
@@ -65,7 +114,7 @@ export function normalizeReference(kind, input, options = {}) {
   return {
     ...common,
     className: cleanText(input?.className, 120),
-    levels: cleanList(input?.levels, 20),
+    levels: normalizeCareerLevels(input?.levels, common.id),
     skills: cleanList(input?.skills),
     skillIds: cleanIdList(input?.skillIds),
     talents: cleanList(input?.talents),
@@ -84,6 +133,7 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
   }
   const seen = new Set();
   const seenIds = new Set();
+  const seenLevelIds = new Set();
   for (const [index, entry] of entries.entries()) {
     const location = `Entrée ${index + 1}`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -110,13 +160,52 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
       ? ['deityIds', 'particularities']
       : entry.kind === 'deities'
         ? ['religionIds', 'domains', 'symbols']
-        : ['levels', 'skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
+        : ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
     for (const field of listFields) {
       if (entry[field] !== undefined && (!Array.isArray(entry[field]) || entry[field].some((value) => typeof value !== 'string'))) {
         errors.push(`${location} : champ « ${field} » invalide.`);
       }
     }
     if (entry.description !== undefined && typeof entry.description !== 'string') errors.push(`${location} : description invalide.`);
+    if (entry.kind === 'careers' && entry.levels !== undefined) {
+      if (!Array.isArray(entry.levels) || entry.levels.length > 100) {
+        errors.push(`${location} : la liste des niveaux est invalide (100 maximum).`);
+      } else {
+        entry.levels.forEach((level, levelIndex) => {
+          if (typeof level === 'string') return; // Compatibilité avec les anciens référentiels.
+          if (!level || typeof level !== 'object' || Array.isArray(level)) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : objet invalide.`);
+            return;
+          }
+          if (typeof level.id !== 'string' || !level.id.trim() || level.id.length > 180) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : identifiant absent ou invalide.`);
+          } else if (seenLevelIds.has(level.id)) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : identifiant de niveau dupliqué.`);
+          } else {
+            seenLevelIds.add(level.id);
+          }
+          if (typeof level.name !== 'string' || !level.name.trim() || level.name.length > 160) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : nom absent ou invalide.`);
+          }
+          if (level.careerId !== undefined && level.careerId !== entry.id) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : le niveau est associé à une autre carrière.`);
+          }
+          if (level.rank !== undefined && (!Number.isInteger(Number(level.rank)) || Number(level.rank) < 1 || Number(level.rank) > 99)) {
+            errors.push(`${location}, niveau ${levelIndex + 1} : rang invalide.`);
+          }
+          for (const field of CAREER_LEVEL_LIST_FIELDS) {
+            if (level[field] !== undefined && (!Array.isArray(level[field]) || level[field].some((value) => typeof value !== 'string'))) {
+              errors.push(`${location}, niveau ${levelIndex + 1} : champ « ${field} » invalide.`);
+            }
+          }
+          for (const field of ['description', 'additionalInformation']) {
+            if (level[field] !== undefined && typeof level[field] !== 'string') {
+              errors.push(`${location}, niveau ${levelIndex + 1} : champ « ${field} » invalide.`);
+            }
+          }
+        });
+      }
+    }
   }
 
   const knownTypes = new Map(existingEntries.map((entry) => [entry.id, entry.kind]));
@@ -150,7 +239,8 @@ export async function loadBuiltInReferenceData() {
   const allEntries = datasets.flatMap((dataset) => (dataset.entries || []).map((entry) => ({ ...entry, kind: dataset.kind })));
   for (const kind of REFERENCE_KINDS) {
     const dataset = datasets.find((item) => item.kind === kind);
-    if (!dataset || dataset.schemaVersion !== 1 || !Number.isInteger(dataset.version) || dataset.version < 1) {
+    const expectedSchemaVersion = kind === 'careers' ? 2 : 1;
+    if (!dataset || dataset.schemaVersion !== expectedSchemaVersion || !Number.isInteger(dataset.version) || dataset.version < 1) {
       throw new Error(`En-tête invalide pour le référentiel intégré « ${kind} ».`);
     }
     if (!Array.isArray(dataset.entries)) throw new Error(`La liste du référentiel « ${kind} » est absente.`);
@@ -188,11 +278,23 @@ export function getReferenceOptions(entries, kind, { religionId = '' } = {}) {
 }
 
 export function getCareerLevels(career) {
-  return cleanList(career?.levels, 20);
+  return normalizeCareerLevels(career?.levels, career?.id || 'career:unknown');
+}
+
+export function findCareerLevel(career, levelId = '', legacyName = '') {
+  const levels = getCareerLevels(career);
+  if (levelId) {
+    const byId = levels.find((level) => level.id === levelId);
+    if (byId) return byId;
+  }
+  const normalizedName = cleanText(legacyName, 160).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr-FR');
+  if (!normalizedName) return null;
+  const matches = levels.filter((level) => level.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr-FR') === normalizedName);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function createCustomReference(kind, values = {}) {
-  return normalizeReference(kind, { ...values, id: `custom:${KIND_SINGULAR[kind]}:${createId()}` }, { source: 'custom', packId: null });
+  return normalizeReference(kind, { ...values, id: values.id || `custom:${KIND_SINGULAR[kind]}:${createId()}` }, { source: 'custom', packId: null });
 }
 
 export function buildReferenceSaveBundle(entries, nextEntry) {
@@ -280,11 +382,30 @@ export function parseReferencePack(payload, existingEntries = []) {
 export function prepareImportedReferencePack(pack, existingEntries = []) {
   const packId = createId();
   const idMap = new Map(pack.entries.map((entry, index) => [entry.id, `pack:${packId}:${index + 1}`]));
+  const levelIdMap = new Map();
+  pack.entries.forEach((entry, entryIndex) => {
+    if (entry.kind !== 'careers' || !Array.isArray(entry.levels)) return;
+    entry.levels.forEach((level, levelIndex) => {
+      if (level && typeof level === 'object' && typeof level.id === 'string') {
+        levelIdMap.set(level.id, `pack-level:${packId}:${entryIndex + 1}:${levelIndex + 1}`);
+      }
+    });
+  });
   const existingIds = new Set(existingEntries.map((entry) => entry.id));
   return pack.entries.map((raw) => {
     const mapped = { ...raw, id: idMap.get(raw.id) };
     if (Array.isArray(mapped.deityIds)) mapped.deityIds = mapped.deityIds.map((id) => idMap.get(id) || (existingIds.has(id) ? id : null)).filter(Boolean);
     if (Array.isArray(mapped.religionIds)) mapped.religionIds = mapped.religionIds.map((id) => idMap.get(id) || (existingIds.has(id) ? id : null)).filter(Boolean);
+    if (raw.kind === 'careers' && Array.isArray(raw.levels)) {
+      mapped.levels = raw.levels.map((level) => {
+        if (typeof level === 'string') return level;
+        return {
+          ...level,
+          id: levelIdMap.get(level.id) || `pack-level:${packId}:${raw.levels.indexOf(level) + 1}`,
+          careerId: mapped.id
+        };
+      });
+    }
     return normalizeReference(raw.kind, mapped, { source: 'pack', packId });
   });
 }

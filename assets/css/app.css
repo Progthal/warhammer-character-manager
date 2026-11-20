@@ -245,6 +245,7 @@ h1, h2, h3, p { margin-top: 0; }
 .reference-picker-empty { padding: 10px 8px; }
 .career-level-field { align-content: start; }
 .career-level-field select:disabled { opacity: .58; cursor: not-allowed; }
+.text-button { justify-self: start; padding: 3px 0; border: 0; background: transparent; color: var(--gold); font: inherit; font-size: 10px; text-decoration: underline; cursor: pointer; }
 .career-preview { padding: 12px 14px; border: 1px solid #38392f; border-radius: 4px; background: rgba(29, 30, 26, .72); }
 .career-preview-content > p, .career-preview-empty { margin: 0 0 7px; color: #b2ad9f; font-size: 10px; line-height: 1.6; }
 .career-preview-content > div { display: grid; gap: 5px; }
@@ -305,6 +306,24 @@ h1, h2, h3, p { margin-top: 0; }
 .reference-editor-dialog .form-section { max-height: 68vh; overflow-y: auto; }
 .reference-editor-dialog .form-grid { align-items: start; }
 .reference-editor-dialog select[multiple] { min-height: 110px; padding: 7px; color-scheme: dark; }
+.career-levels-editor { min-width: 0; padding: 13px; border: 1px solid #38392f; border-radius: 4px; background: rgba(22, 23, 20, .62); }
+.career-levels-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.career-levels-heading > div { display: grid; gap: 4px; }
+.career-levels-heading strong { color: var(--gold-light); font: 500 14px var(--font-display); }
+.career-levels-heading small, .career-levels-empty { color: #858579; font-size: 9px; line-height: 1.6; }
+.career-level-list { display: grid; gap: 12px; }
+.career-level-card { min-width: 0; padding: 12px; border: 1px solid #3b3c33; border-radius: 4px; background: #1b1c18; }
+.career-level-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.career-level-card-header > div:first-child { display: grid; gap: 3px; }
+.career-level-card-header strong { color: #e3dccd; font: 500 13px var(--font-display); }
+.career-level-card-actions { display: flex; align-items: center; gap: 5px; }
+.career-level-card-actions .icon-button { width: 27px; height: 27px; }
+.career-level-card-actions .icon-button:disabled { opacity: .3; cursor: not-allowed; }
+.career-level-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.career-level-fields .form-field { min-width: 0; }
+.career-level-fields input, .career-level-fields textarea { width: 100%; min-width: 0; }
+.career-level-fields textarea { min-height: 56px; }
+.career-levels-empty { margin: 0; }
 
 @media (min-width: 1500px) { .character-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1120px) {
@@ -401,6 +420,8 @@ h1, h2, h3, p { margin-top: 0; }
   .reference-tools .button { flex: 1; padding: 0 8px; font-size: 8px; }
   .reference-legend { align-items: flex-start; flex-direction: column; }
   .reference-editor-dialog .form-section { max-height: 68vh; padding: 18px 17px; }
+  .career-levels-heading { align-items: flex-start; flex-direction: column; }
+  .career-level-fields { grid-template-columns: minmax(0, 1fr); }
   .editor-footer { align-items: flex-start; flex-direction: column; padding: 11px 17px; }
   .editor-footer > div { width: 100%; }
   .editor-footer .button { flex: 1; padding: 0 8px; font-size: 9px; }

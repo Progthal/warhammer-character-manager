@@ -3,14 +3,15 @@ import { deleteCharacter, getAllCharacters, getCharacter, saveCharacter, getAllR
 import { createBackupExport, createCharacterExport, MAX_IMPORT_SIZE, parseImportPayload, prepareImportedCharacters } from './services/import-export.js';
 import {
   MAX_REFERENCE_IMPORT_SIZE, initializeBuiltInReferences,
-  createCustomReference, exportCustomReferencePack, parseReferencePack,
-  prepareImportedReferencePack, saveReferenceEntry, buildReferenceDeleteBundle, getCareerLevels
+  createCareerLevel, createCustomReference, exportCustomReferencePack, parseReferencePack,
+  prepareImportedReferencePack, saveReferenceEntry, buildReferenceDeleteBundle,
+  getCareerLevels, findCareerLevel
 } from './services/reference-catalog.js';
-import { renderReferencePicker, mountReferencePickers, isDeityCompatibleWithReligion } from './components/reference-picker.js';
+import { renderReferencePicker, mountReferencePickers, isDeityCompatibleWithReligion, findReferenceByLegacyValue } from './components/reference-picker.js';
 import { getRoute, navigate } from './router.js';
 import { renderDashboard, renderCharacterGrid } from './views/dashboard.js';
 import { renderCharacterDetail } from './views/character-detail.js';
-import { renderReferenceManager, renderReferenceEditor, filterReferenceCards } from './views/reference-manager.js';
+import { renderReferenceManager, renderReferenceEditor, renderCareerLevelsEditor, filterReferenceCards } from './views/reference-manager.js';
 import { escapeHTML } from './utils/format.js';
 
 const viewRoot = document.querySelector('#view-root');
@@ -112,7 +113,7 @@ function renderCurrentRoute() {
       viewRoot.innerHTML = `<section class="not-found"><span class="empty-emblem">✧</span><h1>Cette fiche est introuvable</h1><p>Elle a peut-être été supprimée ou déplacée.</p><a class="button button-primary" href="#/">Retour au registre</a></section>`;
       return;
     }
-    viewRoot.innerHTML = renderCharacterDetail(character);
+    viewRoot.innerHTML = renderCharacterDetail(character, referenceEntries);
     return;
   }
   viewRoot.innerHTML = renderDashboard(characters);
@@ -152,38 +153,45 @@ function selectField(label, name, value, options) {
 function careerLevelField(identity, selectedCareer) {
   const levels = getCareerLevels(selectedCareer);
   const current = identity.careerLevel || '';
-  const hasCurrent = current && !levels.includes(current);
+  const selectedLevel = findCareerLevel(selectedCareer, identity.careerLevelId, current);
+  const unmatchedCurrent = current && !selectedLevel;
   const options = [
-    '<option value="">À définir</option>',
-    ...(hasCurrent ? [`<option value="${escapeHTML(current)}" selected>${escapeHTML(current)} · valeur conservée</option>`] : []),
-    ...levels.map((level) => `<option value="${escapeHTML(level)}" ${current === level ? 'selected' : ''}>${escapeHTML(level)}</option>`)
+    `<option value="" ${selectedLevel ? '' : 'selected'}>${unmatchedCurrent ? `Ancienne valeur à réassocier : ${escapeHTML(current)}` : 'À définir'}</option>`,
+    ...levels.map((level) => `<option value="${escapeHTML(level.id)}" ${selectedLevel?.id === level.id ? 'selected' : ''}>${escapeHTML(level.rank)} · ${escapeHTML(level.name)}</option>`)
   ].join('');
-  const disabled = levels.length ? '' : 'disabled';
-  const hint = levels.length
-    ? 'Choisissez un niveau défini dans la fiche de carrière.'
-    : 'Aucun niveau n’est renseigné pour cette carrière. Vous pouvez compléter ses niveaux dans les Référentiels.';
-  return `<div class="form-field career-level-field"><span>Niveau de carrière</span><select id="career-level-select" ${disabled}>${options}</select><input type="hidden" id="career-level-value" name="identity.careerLevel" value="${escapeHTML(current)}"><small class="form-hint" id="career-level-hint">${hint}</small></div>`;
+  const disabled = selectedCareer && levels.length ? '' : 'disabled';
+  const hint = !selectedCareer
+    ? 'Sélectionnez une carrière pour consulter ses niveaux.'
+    : unmatchedCurrent
+      ? `L’ancienne valeur « ${current} » est conservée. Choisissez un niveau pour la réassocier.`
+      : levels.length
+        ? 'Choisissez un niveau. Son identifiant stable sera enregistré dans la fiche.'
+        : 'Aucun niveau vérifié n’est renseigné pour cette carrière. Ajoutez les informations depuis les Référentiels.';
+  return `<div class="form-field career-level-field"><span>Niveau de carrière</span><select id="career-level-select" ${disabled}>${options}</select><input type="hidden" id="career-level-value" name="identity.careerLevel" value="${escapeHTML(current)}"><input type="hidden" id="career-level-id" name="identity.careerLevelId" value="${escapeHTML(selectedLevel?.id || identity.careerLevelId || '')}"><small class="form-hint" id="career-level-hint">${escapeHTML(hint)}</small>${selectedCareer && !levels.length ? '<button type="button" class="text-button" data-action="open-references">Ouvrir les Référentiels</button>' : ''}</div>`;
 }
 
-function careerPreviewMarkup(career) {
+function careerPreviewMarkup(career, selectedLevel = null) {
   if (!career) return '<p class="career-preview-empty">Sélectionnez une carrière pour afficher sa fiche.</p>';
   const details = [
     career.className ? `<span><strong>Classe :</strong> ${escapeHTML(career.className)}</span>` : '',
-    career.levels?.length ? `<span><strong>Niveaux :</strong> ${escapeHTML(career.levels.join(' · '))}</span>` : '',
-    career.skills?.length ? `<span><strong>Compétences :</strong> ${escapeHTML(career.skills.join(' · '))}</span>` : '',
-    career.talents?.length ? `<span><strong>Talents :</strong> ${escapeHTML(career.talents.join(' · '))}</span>` : '',
-    career.advancements?.length ? `<span><strong>Avancements :</strong> ${escapeHTML(career.advancements.join(' · '))}</span>` : '',
-    career.entryConditions?.length ? `<span><strong>Entrée :</strong> ${escapeHTML(career.entryConditions.join(' · '))}</span>` : '',
-    career.exitConditions?.length ? `<span><strong>Sortie :</strong> ${escapeHTML(career.exitConditions.join(' · '))}</span>` : '',
-    career.equipment?.length ? `<span><strong>Équipement :</strong> ${escapeHTML(career.equipment.join(' · '))}</span>` : ''
+    selectedLevel ? `<span><strong>Niveau ${escapeHTML(selectedLevel.rank)} :</strong> ${escapeHTML(selectedLevel.name)}</span>` : career.levels?.length ? `<span><strong>Niveaux :</strong> ${escapeHTML(getCareerLevels(career).map((level) => level.name).join(' · '))}</span>` : '',
+    ...((selectedLevel?.skills || career.skills || []).length ? [`<span><strong>Compétences :</strong> ${escapeHTML((selectedLevel?.skills || career.skills).join(' · '))}</span>`] : []),
+    ...((selectedLevel?.talents || career.talents || []).length ? [`<span><strong>Talents :</strong> ${escapeHTML((selectedLevel?.talents || career.talents).join(' · '))}</span>`] : []),
+    ...((selectedLevel?.advancements || career.advancements || []).length ? [`<span><strong>Avancements :</strong> ${escapeHTML((selectedLevel?.advancements || career.advancements).join(' · '))}</span>`] : []),
+    ...((selectedLevel?.entryConditions || career.entryConditions || []).length ? [`<span><strong>Conditions d’accès :</strong> ${escapeHTML((selectedLevel?.entryConditions || career.entryConditions).join(' · '))}</span>`] : []),
+    ...((selectedLevel?.exitConditions || career.exitConditions || []).length ? [`<span><strong>Conditions de sortie :</strong> ${escapeHTML((selectedLevel?.exitConditions || career.exitConditions).join(' · '))}</span>`] : []),
+    ...((selectedLevel?.equipment || career.equipment || []).length ? [`<span><strong>Équipement :</strong> ${escapeHTML((selectedLevel?.equipment || career.equipment).join(' · '))}</span>`] : []),
+    selectedLevel?.description ? `<span><strong>Description :</strong> ${escapeHTML(selectedLevel.description)}</span>` : '',
+    selectedLevel?.additionalInformation ? `<span><strong>Informations :</strong> ${escapeHTML(selectedLevel.additionalInformation)}</span>` : ''
   ].filter(Boolean).join('');
-  return `<div class="career-preview-content">${career.description ? `<p>${escapeHTML(career.description)}</p>` : '<p>Cette entrée ne contient pas encore de description détaillée.</p>'}${details ? `<div>${details}</div>` : '<small>Complétez les niveaux, compétences, talents et autres détails dans la page Référentiels.</small>'}</div>`;
+  return `<div class="career-preview-content">${career.description ? `<p>${escapeHTML(career.description)}</p>` : ''}${details ? `<div>${details}</div>` : '<small>Cette carrière ne contient pas encore de détails vérifiés. Vous pouvez les compléter depuis les Référentiels.</small>'}</div>`;
 }
 
 function renderEditor(character) {
   const { identity, characteristics, secondary, experience, profile } = character;
   const characteristicFields = CHARACTERISTICS.map(({ key, label }) => field(label, `characteristics.${key}`, characteristics[key], { type: 'number', min: 0, max: 999 })).join('');
-  const selectedCareer = referenceEntries.find((entry) => entry.kind === 'careers' && (entry.id === identity.careerId || (!identity.careerId && entry.name.toLocaleLowerCase('fr-FR') === (identity.career || '').toLocaleLowerCase('fr-FR'))));
+  const selectedCareer = findReferenceByLegacyValue(referenceEntries, 'careers', identity.careerId, identity.career);
+  const selectedLevel = findCareerLevel(selectedCareer, identity.careerLevelId, identity.careerLevel);
   return `
     <dialog class="editor-dialog" id="character-dialog" aria-labelledby="editor-title">
       <div class="editor-shell">
@@ -210,7 +218,7 @@ function renderEditor(character) {
             <div class="form-grid">
               ${renderReferencePicker({ kind: 'careers', entries: referenceEntries, selectedId: identity.careerId, value: identity.career })}
               ${careerLevelField(identity, selectedCareer)}
-              <div class="career-preview form-field-wide" id="career-preview">${careerPreviewMarkup(selectedCareer)}</div>
+              <div class="career-preview form-field-wide" id="career-preview">${careerPreviewMarkup(selectedCareer, selectedLevel)}</div>
               ${selectField('Statut', 'identity.status', identity.status, ['Actif', 'En pause', 'Inactif'])}
               ${field('Expérience totale', 'experience.total', experience.total, { type: 'number', min: 0 })}
               ${field('Expérience dépensée', 'experience.spent', experience.spent, { type: 'number', min: 0 })}
@@ -361,7 +369,13 @@ async function openEditor(character) {
   form.addEventListener('input', scheduleEditorSave);
   form.addEventListener('change', (event) => {
     if (event.target.id === 'career-level-select') {
-      document.querySelector('#career-level-value').value = event.target.value;
+      const careerId = form.querySelector('[data-reference-picker="careers"] [data-picker-id]')?.value || '';
+      const career = referenceEntries.find((entry) => entry.kind === 'careers' && entry.id === careerId);
+      const level = getCareerLevels(career).find((item) => item.id === event.target.value);
+      document.querySelector('#career-level-id').value = level?.id || '';
+      document.querySelector('#career-level-value').value = level?.name || '';
+      const preview = document.querySelector('#career-preview');
+      if (preview) preview.innerHTML = careerPreviewMarkup(career, level);
     }
     scheduleEditorSave();
   });
@@ -386,23 +400,30 @@ async function openEditor(character) {
 function updateCareerLevelOptions(career, previousCareer) {
   const select = document.querySelector('#career-level-select');
   const hidden = document.querySelector('#career-level-value');
+  const hiddenId = document.querySelector('#career-level-id');
   const hint = document.querySelector('#career-level-hint');
-  if (!select || !hidden) return;
-  if (career?.id !== previousCareer?.id) hidden.value = '';
+  if (!select || !hidden || !hiddenId) return;
+  if (career?.id !== previousCareer?.id) {
+    hidden.value = '';
+    hiddenId.value = '';
+  }
   const levels = getCareerLevels(career);
-  const current = hidden.value;
+  const currentId = hiddenId.value;
+  const selected = levels.find((level) => level.id === currentId);
   const options = ['<option value="">À définir</option>'];
-  if (current && !levels.includes(current)) options.push(`<option value="${escapeHTML(current)}" selected>${escapeHTML(current)} · valeur conservée</option>`);
-  options.push(...levels.map((level) => `<option value="${escapeHTML(level)}" ${current === level ? 'selected' : ''}>${escapeHTML(level)}</option>`));
+  options.push(...levels.map((level) => `<option value="${escapeHTML(level.id)}" ${selected?.id === level.id ? 'selected' : ''}>${escapeHTML(level.rank)} · ${escapeHTML(level.name)}</option>`));
   select.innerHTML = options.join('');
-  select.disabled = levels.length === 0;
-  select.value = levels.includes(current) ? current : current ? current : '';
-  if (!select.value) hidden.value = '';
+  select.disabled = !career || levels.length === 0;
+  select.value = selected?.id || '';
+  if (selected) {
+    hiddenId.value = selected.id;
+    hidden.value = selected.name;
+  }
   if (hint) hint.textContent = levels.length
-    ? 'Choisissez un niveau défini dans la fiche de carrière.'
-    : 'Aucun niveau n’est renseigné pour cette carrière. Complétez-les dans les Référentiels.';
+    ? 'Choisissez un niveau. Son identifiant stable sera enregistré dans la fiche.'
+    : career ? 'Aucun niveau vérifié n’est renseigné pour cette carrière. Ajoutez les informations depuis les Référentiels.' : 'Sélectionnez une carrière pour consulter ses niveaux.';
   const preview = document.querySelector('#career-preview');
-  if (preview) preview.innerHTML = careerPreviewMarkup(career);
+  if (preview) preview.innerHTML = careerPreviewMarkup(career, selected || null);
   hidden.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
@@ -514,15 +535,61 @@ function splitLines(value) {
 function openReferenceEditor(kind, id = '') {
   const existing = id ? referenceEntries.find((entry) => entry.id === id) : null;
   if (id && !existing) return showToast('Cette entrée de référentiel est introuvable.', 'error');
-  if (existing?.source === 'builtin') return showToast('Les données intégrées sont protégées.', 'error');
-  modalRoot.innerHTML = renderReferenceEditor(kind, existing, referenceEntries);
+  const levelsOnly = existing?.source === 'builtin' && kind === 'careers';
+  if (existing?.source === 'builtin' && !levelsOnly) return showToast('Les données intégrées sont protégées.', 'error');
+  const editorCareerId = kind === 'careers' ? existing?.id || `custom:career:${createId()}` : '';
+  let careerLevels = kind === 'careers' ? getCareerLevels(existing) : [];
+  modalRoot.innerHTML = renderReferenceEditor(kind, existing, referenceEntries, { levelsOnly });
   const dialog = document.querySelector('#reference-editor-dialog');
   const form = document.querySelector('#reference-form');
+  const captureCareerLevels = () => [...form.querySelectorAll('.career-level-card')].map((card, index) => {
+    const level = {
+      id: card.dataset.careerLevelId,
+      careerId: editorCareerId,
+      rank: Number(card.querySelector('[data-level-field="rank"]')?.value) || index + 1
+    };
+    for (const fieldName of ['name', 'description', 'additionalInformation']) {
+      level[fieldName] = card.querySelector(`[data-level-field="${fieldName}"]`)?.value || '';
+    }
+    for (const fieldName of ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment', 'references']) {
+      level[fieldName] = splitLines(card.querySelector(`[data-level-field="${fieldName}"]`)?.value || '');
+    }
+    return level;
+  });
+  const renderLevels = () => {
+    const container = form.querySelector('#career-level-editor');
+    if (container) container.outerHTML = renderCareerLevelsEditor(careerLevels);
+  };
   dialog.addEventListener('close', () => modalRoot.replaceChildren(), { once: true });
   dialog.addEventListener('cancel', (event) => {
     event.preventDefault();
     dialog.close();
   });
+  if (kind === 'careers') {
+    form.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-level-action]');
+      if (!button) return;
+      event.preventDefault();
+      careerLevels = captureCareerLevels();
+      const action = button.dataset.levelAction;
+      const card = button.closest('[data-career-level-id]');
+      const index = careerLevels.findIndex((level) => level.id === card?.dataset.careerLevelId);
+      if (action === 'add') {
+        if (careerLevels.length >= 100) return showToast('Une carrière ne peut pas contenir plus de 100 niveaux.', 'error');
+        careerLevels.push(createCareerLevel(editorCareerId, careerLevels.length + 1));
+      } else if (action === 'remove' && index >= 0) {
+        if (!window.confirm(`Supprimer le niveau « ${careerLevels[index].name || `Niveau ${index + 1}`} » ?`)) return;
+        careerLevels.splice(index, 1);
+      } else if ((action === 'up' || action === 'down') && index >= 0) {
+        const target = action === 'up' ? index - 1 : index + 1;
+        if (target >= 0 && target < careerLevels.length) {
+          [careerLevels[index], careerLevels[target]] = [careerLevels[target], careerLevels[index]];
+        }
+      }
+      careerLevels.forEach((level, levelIndex) => { level.rank = levelIndex + 1; });
+      renderLevels();
+    });
+  }
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = new FormData(form);
@@ -544,8 +611,10 @@ function openReferenceEditor(kind, id = '') {
       data.additionalInformation = values.get('additionalInformation');
       data.religionIds = values.getAll('religionIds');
     } else {
+      careerLevels = captureCareerLevels();
       data.className = values.get('className');
-      data.levels = splitLines(values.get('levels'));
+      data.id = editorCareerId;
+      data.levels = careerLevels;
       data.skills = splitLines(values.get('skills'));
       data.skillIds = splitLines(values.get('skillIds'));
       data.talents = splitLines(values.get('talents'));
@@ -561,6 +630,13 @@ function openReferenceEditor(kind, id = '') {
       return;
     }
     try {
+      if (levelsOnly) {
+        referenceEntries = await saveReferenceEntry({ ...existing, levels: careerLevels }, referenceEntries);
+        dialog.close();
+        renderCurrentRoute();
+        showToast('Niveaux de carrière enregistrés.');
+        return;
+      }
       referenceEntries = await saveReferenceEntry(existing ? data : createCustomReference(kind, data), referenceEntries);
       dialog.close();
       renderCurrentRoute();
@@ -637,6 +713,10 @@ document.addEventListener('click', async (event) => {
   if (action === 'export-references') exportReferences();
   if (action === 'import-references') referenceImportInput.click();
   if (action === 'close-reference-editor') document.querySelector('#reference-editor-dialog')?.close();
+  if (action === 'open-references') {
+    await closeEditor();
+    navigate('/references');
+  }
 });
 
 document.addEventListener('input', (event) => {

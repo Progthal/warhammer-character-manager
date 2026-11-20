@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERISTICS, createCharacter, getCharacterName, getExperienceAvailable, normalizeCharacter, validateCharacter } from '../src/models/character.js';
 import { createBackupExport, createCharacterExport, parseImportPayload, prepareImportedCharacters } from '../src/services/import-export.js';
+import { renderCharacterDetail } from '../src/views/character-detail.js';
 
 test('une nouvelle fiche possède les sections attendues sans valeurs de règles inventées', () => {
   const character = createCharacter();
-  assert.equal(character.schemaVersion, 1);
+  assert.equal(character.schemaVersion, 2);
   assert.equal(character.identity.status, 'Actif');
   assert.equal(character.characteristics.CC, null);
   assert.equal(Object.keys(character.characteristics).length, 10);
@@ -36,6 +37,13 @@ test('les identifiants de référentiel sont ajoutés sans perdre les anciennes 
   assert.equal(linked.identity.religionId, 'builtin:religion:sigmar');
   assert.equal(linked.identity.deityId, 'builtin:deity:sigmar');
   assert.equal(linked.identity.careerId, 'builtin:career:soldat');
+
+  const levelLinked = normalizeCharacter({ identity: {
+    career: 'Soldat', careerId: 'builtin:career:soldat',
+    careerLevel: 'Recrue', careerLevelId: 'builtin:career:soldat:level:1'
+  } });
+  assert.equal(levelLinked.identity.careerLevel, 'Recrue');
+  assert.equal(levelLinked.identity.careerLevelId, 'builtin:career:soldat:level:1');
 });
 
 test('une dépense supérieure au total ne produit pas un solde négatif', () => {
@@ -65,4 +73,37 @@ test('un import malformé ou avec des valeurs numériques invalides est rejeté'
   character.characteristics.CC = -10;
   assert.throws(() => parseImportPayload(createCharacterExport(character)), /Valeur numérique invalide/);
   assert.throws(() => parseImportPayload('{not-json}'), /objet JSON/);
+});
+
+test('l’export et le rechargement JSON conservent les identifiants de carrière et de niveau', () => {
+  const character = createCharacter({ identity: {
+    career: 'Gardien des archives', careerId: 'custom:career:archives',
+    careerLevel: 'Archiviste', careerLevelId: 'career-level:archives-2'
+  } });
+  const payload = createCharacterExport(character);
+  const imported = prepareImportedCharacters(parseImportPayload(payload).characters)[0].character;
+  assert.equal(imported.identity.careerId, 'custom:career:archives');
+  assert.equal(imported.identity.careerLevelId, 'career-level:archives-2');
+  assert.equal(imported.identity.careerLevel, 'Archiviste');
+});
+
+test('la fiche détaillée affiche les informations du niveau référencé par identifiant', () => {
+  const career = {
+    id: 'custom:career:scribe', kind: 'careers', name: 'Scribe', className: 'Lettrés',
+    levels: [{
+      id: 'career-level:scribe:1', careerId: 'custom:career:scribe', name: 'Copiste', rank: 1,
+      skills: ['Écriture'], talents: ['Lecture rapide'], advancements: ['Intelligence'],
+      entryConditions: ['Savoir lire'], equipment: ['Plume']
+    }]
+  };
+  const character = createCharacter({ identity: {
+    firstName: 'Marta', career: 'Scribe', careerId: career.id,
+    careerLevel: 'Copiste', careerLevelId: 'career-level:scribe:1'
+  } });
+  const html = renderCharacterDetail(character, [career]);
+  assert.match(html, /Progression et niveau/);
+  assert.match(html, /Copiste/);
+  assert.match(html, /Écriture/);
+  assert.match(html, /Lecture rapide/);
+  assert.match(html, /Savoir lire/);
 });

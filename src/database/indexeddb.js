@@ -100,14 +100,33 @@ export function saveReferenceMeta(record) {
   return runTransaction('referenceMeta', 'readwrite', (store) => store.put(record));
 }
 
+export function mergeBuiltInCareerLevels(existing, incoming) {
+  if (!existing || existing.source !== 'builtin' || incoming?.kind !== 'careers' || !Array.isArray(incoming.levels)) return existing;
+  const currentLevels = Array.isArray(existing.levels) ? existing.levels : [];
+  const knownIds = new Set(currentLevels.map((level) => typeof level === 'object' ? level.id : '').filter(Boolean));
+  const additions = incoming.levels.filter((level) => level?.id && !knownIds.has(level.id));
+  if (!additions.length) return existing;
+  return {
+    ...existing,
+    levels: [...currentLevels, ...additions].sort((a, b) => (a.rank || 0) - (b.rank || 0))
+  };
+}
+
 export function seedReferenceEntries(entries, metaRecord) {
   return runTransaction(['referenceEntries', 'referenceMeta'], 'readwrite', (stores) => {
-    // Les jeux de données intégrés sont append-only : une nouvelle version peut
-    // ajouter des identifiants, mais ne réécrit jamais une entrée déjà installée.
+    // Les jeux de données intégrés restent append-only. Pour une carrière déjà
+    // installée, les nouveaux niveaux stables sont ajoutés sans remplacer ceux
+    // qui existent déjà ni toucher aux champs personnalisés éventuels.
     entries.forEach((entry) => {
       const request = stores.referenceEntries.get(entry.id);
       request.onsuccess = () => {
-        if (!request.result) stores.referenceEntries.add(entry);
+        const existing = request.result;
+        if (!existing) {
+          stores.referenceEntries.add(entry);
+          return;
+        }
+        const merged = mergeBuiltInCareerLevels(existing, entry);
+        if (merged !== existing) stores.referenceEntries.put({ ...merged, updatedAt: metaRecord.updatedAt });
       };
     });
     stores.referenceMeta.put(metaRecord);

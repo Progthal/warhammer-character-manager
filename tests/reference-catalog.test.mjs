@@ -4,8 +4,10 @@ import { readFile } from 'node:fs/promises';
 import {
   buildReferenceDeleteBundle,
   buildReferenceSaveBundle,
+  createCareerLevel,
   createCustomReference,
   exportCustomReferencePack,
+  findCareerLevel,
   getCareerLevels,
   getReferenceOptions,
   loadBuiltInReferenceData,
@@ -15,7 +17,9 @@ import {
   validateReferenceEntries
 } from '../src/services/reference-catalog.js';
 import { filterReferenceOptions, findReferenceByLegacyValue, isDeityCompatibleWithReligion } from '../src/components/reference-picker.js';
-import { upgradeDatabase, DATABASE_VERSION } from '../src/database/migrations.js';
+import { upgradeDatabase, DATABASE_VERSION, migrateCareerReferenceRecord, migrateCharacterRecord } from '../src/database/migrations.js';
+import { mergeBuiltInCareerLevels } from '../src/database/indexeddb.js';
+import { renderCareerLevelsEditor, renderReferenceEditor, renderReferenceManager } from '../src/views/reference-manager.js';
 
 const kinds = ['religions', 'deities', 'careers'];
 const datasets = Object.fromEntries(await Promise.all(kinds.map(async (kind) => [
@@ -28,6 +32,8 @@ test('les trois référentiels initiaux sont lisibles, structurés et identifié
   assert.equal(datasets.religions.entries.length, 10);
   assert.equal(datasets.deities.entries.length, 10);
   assert.equal(datasets.careers.entries.length, 64);
+  assert.equal(datasets.careers.schemaVersion, 2);
+  assert.equal(datasets.careers.version, 2);
   for (const kind of kinds) {
     const result = validateReferenceEntries(datasets[kind].entries.map((entry) => ({ ...entry, kind })), { existingEntries: builtins });
     assert.equal(result.valid, true, result.errors.join('; '));
@@ -46,7 +52,7 @@ test('le chargement automatique récupère les trois jeux JSON versionnés', asy
   try {
     const loaded = await loadBuiltInReferenceData();
     assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions']);
-    assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 1);
+    assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -73,17 +79,78 @@ test('le changement de religion détecte les incompatibilités et la recherche e
   assert.deepEqual(filterReferenceOptions(builtins, 'deities', 'eaux', { religionId: sigmarReligion.id }), []);
 });
 
-test('une carrière personnalisée peut stocker ses niveaux et ses relations vers compétences et talents', () => {
+test('une carrière personnalisée stocke plusieurs niveaux structurés avec des identifiants stables', () => {
+  const careerId = 'custom:career:test';
   const career = normalizeReference('careers', {
-    id: 'custom:career:test', name: 'Gardien des archives', className: 'Lettrés',
-    levels: ['Apprenti', 'Archiviste'], skills: ['Érudition'], skillIds: ['skill:lore'],
+    id: careerId, name: 'Gardien des archives', className: 'Lettrés',
+    levels: [
+      { id: 'career-level:archives-1', careerId, name: 'Apprenti', rank: 1, skills: ['Érudition'], skillIds: ['skill:lore'] },
+      { id: 'career-level:archives-2', careerId, name: 'Archiviste', rank: 2, talents: ['Mémoire prodigieuse'], talentIds: ['talent:memory'], advancements: ['Intelligence'], entryConditions: ['Être apprenti'], additionalInformation: 'Niveau supérieur' }
+    ],
     talents: ['Mémoire prodigieuse'], talentIds: ['talent:memory']
   });
-  assert.deepEqual(career.levels, ['Apprenti', 'Archiviste']);
-  assert.deepEqual(getCareerLevels(career), ['Apprenti', 'Archiviste']);
-  assert.deepEqual(career.skillIds, ['skill:lore']);
+  assert.deepEqual(getCareerLevels(career).map((level) => level.name), ['Apprenti', 'Archiviste']);
+  assert.ok(career.levels.every((level) => level.careerId === careerId && level.id));
+  assert.deepEqual(career.levels[1].entryConditions, ['Être apprenti']);
+  assert.deepEqual(career.levels[0].skillIds, ['skill:lore']);
   assert.deepEqual(career.talentIds, ['talent:memory']);
+  assert.equal(findCareerLevel(career, 'career-level:archives-2').name, 'Archiviste');
+  assert.equal(findCareerLevel(career, '', 'Archiviste').id, 'career-level:archives-2');
   assert.deepEqual(filterReferenceOptions([career], 'careers', 'archiv'), [career]);
+
+  const created = createCareerLevel(careerId, 3);
+  assert.ok(created.id);
+  assert.equal(created.careerId, careerId);
+  assert.equal(created.rank, 3);
+});
+
+test('les anciennes listes de niveaux texte sont converties en objets sans perdre les intitulés', () => {
+  const migrated = migrateCareerReferenceRecord({
+    id: 'custom:career:legacy', kind: 'careers', name: 'Carrière historique',
+    levels: ['Apprenti', 'Compagnon']
+  });
+  assert.deepEqual(migrated.levels.map((level) => level.name), ['Apprenti', 'Compagnon']);
+  assert.deepEqual(migrated.levels.map((level) => level.rank), [1, 2]);
+  assert.ok(migrated.levels.every((level) => level.careerId === migrated.id && level.id));
+  assert.deepEqual(migrateCareerReferenceRecord(migrated).levels.map((level) => level.id), migrated.levels.map((level) => level.id));
+});
+
+test('la migration ne tronque pas un référentiel historique contenant plus de vingt niveaux', () => {
+  const oldLevels = Array.from({ length: 24 }, (_, index) => `Niveau ${index + 1}`);
+  const migrated = migrateCareerReferenceRecord({ id: 'career:many', kind: 'careers', levels: oldLevels });
+  assert.equal(migrated.levels.length, 24);
+  assert.equal(migrated.levels[23].name, 'Niveau 24');
+});
+
+test('une mise à jour du seed ajoute les nouveaux niveaux intégrés sans remplacer les niveaux existants', () => {
+  const careerId = 'builtin:career:test';
+  const existing = {
+    id: careerId, kind: 'careers', source: 'builtin', name: 'Carrière',
+    levels: [{ id: 'builtin-level:1', careerId, name: 'Niveau existant', rank: 1 }]
+  };
+  const incoming = {
+    id: careerId, kind: 'careers',
+    levels: [
+      { id: 'builtin-level:1', careerId, name: 'Niveau remplacé', rank: 1 },
+      { id: 'builtin-level:2', careerId, name: 'Nouveau niveau', rank: 2 }
+    ]
+  };
+  const merged = mergeBuiltInCareerLevels(existing, incoming);
+  assert.equal(merged.levels.length, 2);
+  assert.equal(merged.levels[0].name, 'Niveau existant');
+  assert.equal(merged.levels[1].careerId, careerId);
+  assert.equal(mergeBuiltInCareerLevels(merged, incoming), merged);
+});
+
+test('l’administration affiche la gestion des niveaux des carrières intégrées sans déverrouiller leur nom', () => {
+  const career = { ...builtins.find((entry) => entry.kind === 'careers'), levels: [] };
+  const html = renderReferenceManager([career]);
+  const editor = renderReferenceEditor('careers', career, [career], { levelsOnly: true });
+  assert.match(html, /Gérer les niveaux/);
+  assert.match(editor, /Ajouter un niveau/);
+  assert.match(editor, /nom et la classe de cette carrière intégrée sont protégés/);
+  assert.doesNotMatch(editor, /name="className"/);
+  assert.match(renderCareerLevelsEditor([]), /Aucun niveau renseigné/);
 });
 
 test('les relations personnalisées se synchronisent sans modifier les entrées intégrées', () => {
@@ -118,6 +185,20 @@ test('un pack exporté puis importé devient un pack distinct avec relations rem
   assert.deepEqual(importedDeity.religionIds, [importedReligion.id]);
 });
 
+test('un pack importe les niveaux de carrière sous de nouveaux identifiants et les relie à la carrière copiée', () => {
+  const career = normalizeReference('careers', {
+    id: 'custom:career:bookkeeper', name: 'Comptable', className: 'Lettrés',
+    levels: [{ id: 'career-level:bookkeeper:1', careerId: 'custom:career:bookkeeper', name: 'Aide-comptable', rank: 1 }]
+  });
+  const pack = parseReferencePack(exportCustomReferencePack([career]), builtins);
+  const [imported] = prepareImportedReferencePack(pack, builtins);
+  assert.notEqual(imported.id, career.id);
+  assert.equal(imported.levels.length, 1);
+  assert.notEqual(imported.levels[0].id, career.levels[0].id);
+  assert.equal(imported.levels[0].careerId, imported.id);
+  assert.equal(imported.levels[0].name, 'Aide-comptable');
+});
+
 test('les relations inconnues sont rejetées et une entrée intégrée ne peut pas être supprimée', () => {
   const invalid = validateReferenceEntries([{ kind: 'deities', id: 'custom:deity:x', name: 'Inconnue', religionIds: ['inconnue'] }]);
   assert.equal(invalid.valid, false);
@@ -150,8 +231,9 @@ test('la migration IndexedDB v2 ajoute les référentiels sans supprimer le maga
       return store;
     }
   };
-  upgradeDatabase(database, null, 0);
-  assert.equal(DATABASE_VERSION, 2);
+  const transaction = { objectStore: () => ({ openCursor() { const request = {}; queueMicrotask(() => { request.result = null; request.onsuccess?.(); }); return request; } }) };
+  upgradeDatabase(database, transaction, 0);
+  assert.equal(DATABASE_VERSION, 3);
   assert.ok(stores.has('characters'));
   assert.ok(stores.has('referenceEntries'));
   assert.ok(stores.has('referenceMeta'));
@@ -170,8 +252,32 @@ test('la migration depuis une base v1 conserve le magasin characters existant', 
       return store;
     }
   };
-  upgradeDatabase(database, null, 1);
+  const transaction = { objectStore: () => ({ openCursor() { const request = {}; queueMicrotask(() => { request.result = null; request.onsuccess?.(); }); return request; } }) };
+  upgradeDatabase(database, transaction, 1);
   assert.equal(stores.get('characters'), existingCharactersStore);
   assert.ok(stores.has('referenceEntries'));
   assert.ok(stores.has('referenceMeta'));
+});
+
+test('la migration v3 conserve les valeurs de personnage et ajoute les identifiants de niveau', () => {
+  const oldCharacter = {
+    id: 'character-1', schemaVersion: 1,
+    identity: { career: 'Soldat', careerId: 'builtin:career:soldat', careerLevel: 'Recrue' },
+    profile: { notes: 'Notes conservées' }
+  };
+  const migrated = migrateCharacterRecord(oldCharacter);
+  assert.equal(migrated.schemaVersion, 2);
+  assert.equal(migrated.identity.careerLevel, 'Recrue');
+  assert.equal(migrated.identity.careerLevelId, '');
+  assert.equal(migrated.profile.notes, 'Notes conservées');
+  assert.equal(oldCharacter.identity.careerLevel, 'Recrue');
+});
+
+test('la validation rejette les identifiants de niveau associés à une autre carrière', () => {
+  const result = validateReferenceEntries([{
+    kind: 'careers', id: 'custom:career:a', name: 'Carrière A',
+    levels: [{ id: 'level:wrong', careerId: 'custom:career:b', name: 'Niveau', rank: 1 }]
+  }]);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join(' '), /associé à une autre carrière/);
 });

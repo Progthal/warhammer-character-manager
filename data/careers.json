@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "careers",
-  "version": 1,
-  "sourceNote": "Liste française issue d’une aide de jeu secondaire de création WFRP4e (https://www.feldo.fr/wp-content/uploads/2019/08/WFRP4_Creation_de_personnages_2019-08-16.pdf). Les intitulés sont à vérifier selon la traduction du livre de base ; ce fichier ne constitue pas une nomenclature officielle. Seuls les noms et les classes sont fournis.",
+  "version": 2,
+  "sourceNote": "Liste française issue d’une aide de jeu secondaire de création WFRP4e (https://www.feldo.fr/wp-content/uploads/2019/08/WFRP4_Creation_de_personnages_2019-08-16.pdf). Les intitulés sont à vérifier selon la traduction du livre de base ; ce fichier ne constitue pas une nomenclature officielle. La source consultée fournit les noms et classes, mais pas les niveaux détaillés : aucun niveau n’est ajouté sans source vérifiée et autorisée. Le schéma prend désormais en charge des objets de niveau structurés.",
   "entries": [
     {
       "id": "builtin:career:apothicaire",

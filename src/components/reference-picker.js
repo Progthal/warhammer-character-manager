@@ -35,7 +35,11 @@ export function filterReferenceOptions(catalog, kind, query = '', { religionId =
 }
 
 function entrySummary(entry) {
-  if (entry.kind === 'careers') return [entry.className, entry.description, ...(entry.levels || []).slice(0, 4)].filter(Boolean).join(' · ');
+  if (entry.kind === 'careers') return [
+    entry.className,
+    entry.description,
+    ...(entry.levels || []).slice(0, 4).map((level) => typeof level === 'string' ? level : level.name)
+  ].filter(Boolean).join(' · ');
   if (entry.kind === 'deities') return [...(entry.domains || []), ...(entry.symbols || []), entry.description].filter(Boolean).join(' · ');
   return [entry.origin, ...(entry.particularities || []), entry.description].filter(Boolean).join(' · ');
 }

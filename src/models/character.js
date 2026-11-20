@@ -35,11 +35,11 @@ export function createCharacter(overrides = {}) {
   const now = new Date().toISOString();
   return normalizeCharacter({
     id: createId(),
-    schemaVersion: 1,
+    schemaVersion: 2,
     identity: {
       firstName: '', lastName: '', species: '', gender: '', age: null,
       height: '', weight: '', eyeColor: '', hairColor: '', origin: '',
-      religion: '', religionId: '', deity: '', deityId: '', career: '', careerId: '', careerLevel: '', status: 'Actif'
+      religion: '', religionId: '', deity: '', deityId: '', career: '', careerId: '', careerLevel: '', careerLevelId: '', status: 'Actif'
     },
     characteristics: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, null])),
     secondary: {
@@ -67,7 +67,7 @@ export function normalizeCharacter(input) {
 
   return {
     id: cleanText(source.id, 100) || createId(),
-    schemaVersion: 1,
+    schemaVersion: 2,
     identity: {
       firstName: cleanText(identity.firstName, 100),
       lastName: cleanText(identity.lastName, 100),
@@ -85,7 +85,8 @@ export function normalizeCharacter(input) {
       deityId: cleanText(identity.deityId, 180),
       career: cleanText(identity.career, 160),
       careerId: cleanText(identity.careerId, 180),
-      careerLevel: cleanText(identity.careerLevel, 80),
+      careerLevel: cleanText(identity.careerLevel, 160),
+      careerLevelId: cleanText(identity.careerLevelId, 180),
       status: cleanText(identity.status, 40) || 'Actif'
     },
     characteristics: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, cleanNumber(characteristics[key])])),

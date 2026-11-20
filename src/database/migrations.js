@@ -1,5 +1,65 @@
 export const DATABASE_NAME = 'warhammer-character-manager';
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
+
+export function migrateCareerReferenceRecord(record) {
+  if (!record || record.kind !== 'careers' || !Array.isArray(record.levels)) return record;
+  const usedIds = new Set();
+  const levels = record.levels.map((value, index) => {
+    const legacy = typeof value === 'string';
+    const level = legacy ? { name: value } : value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    let id = typeof level.id === 'string' && level.id.trim()
+      ? level.id
+      : `${record.id}:level:${index + 1}`;
+    if (usedIds.has(id)) id = `${record.id}:level:${index + 1}`;
+    usedIds.add(id);
+    const rank = Number.isInteger(Number(level.rank)) && Number(level.rank) > 0
+      ? Math.min(Number(level.rank), 99)
+      : index + 1;
+    return {
+      ...level,
+      id,
+      careerId: record.id,
+      name: typeof level.name === 'string' ? level.name : '',
+      rank,
+      description: typeof level.description === 'string' ? level.description : '',
+      skills: Array.isArray(level.skills) ? level.skills : [],
+      skillIds: Array.isArray(level.skillIds) ? level.skillIds : [],
+      talents: Array.isArray(level.talents) ? level.talents : [],
+      talentIds: Array.isArray(level.talentIds) ? level.talentIds : [],
+      advancements: Array.isArray(level.advancements) ? level.advancements : [],
+      entryConditions: Array.isArray(level.entryConditions) ? level.entryConditions : [],
+      exitConditions: Array.isArray(level.exitConditions) ? level.exitConditions : [],
+      equipment: Array.isArray(level.equipment) ? level.equipment : [],
+      additionalInformation: typeof level.additionalInformation === 'string' ? level.additionalInformation : '',
+      references: Array.isArray(level.references) ? level.references : []
+    };
+  });
+  return { ...record, levels };
+}
+
+export function migrateCharacterRecord(record) {
+  if (!record || typeof record !== 'object') return record;
+  const identity = record.identity && typeof record.identity === 'object' ? record.identity : {};
+  return {
+    ...record,
+    schemaVersion: Math.max(Number(record.schemaVersion) || 1, 2),
+    identity: {
+      ...identity,
+      careerLevelId: typeof identity.careerLevelId === 'string' ? identity.careerLevelId : ''
+    }
+  };
+}
+
+function migrateStoreRecords(store, migrate) {
+  const request = store.openCursor();
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    const migrated = migrate(cursor.value);
+    if (migrated !== cursor.value) cursor.update(migrated);
+    cursor.continue();
+  };
+}
 
 export function upgradeDatabase(database, transaction, oldVersion) {
   if (oldVersion < 1 && !database.objectStoreNames.contains('characters')) {
@@ -22,8 +82,12 @@ export function upgradeDatabase(database, transaction, oldVersion) {
     }
   }
 
-  // Les prochaines évolutions de schéma seront ajoutées ici sans supprimer
-  // les fiches déjà enregistrées dans le navigateur. La migration 2 ajoute
-  // uniquement les magasins de référentiels : le magasin characters reste intact.
-  void transaction;
+  if (oldVersion < 3) {
+    if (database.objectStoreNames.contains('referenceEntries')) {
+      migrateStoreRecords(transaction.objectStore('referenceEntries'), migrateCareerReferenceRecord);
+    }
+    if (database.objectStoreNames.contains('characters')) {
+      migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
+    }
+  }
 }

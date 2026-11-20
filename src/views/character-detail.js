@@ -1,4 +1,5 @@
 import { CHARACTERISTICS, getCharacterName, getExperienceAvailable } from '../models/character.js';
+import { findCareerLevel, getCareerLevels } from '../services/reference-catalog.js';
 import { escapeHTML, formatDate } from '../utils/format.js';
 
 function valueOrDash(value, suffix = '') {
@@ -9,7 +10,35 @@ function detailBlock(label, value) {
   return `<div class="detail-block"><span>${label}</span><strong>${value || '—'}</strong></div>`;
 }
 
-export function renderCharacterDetail(character) {
+function careerLevelSection(identity, referenceEntries) {
+  const career = referenceEntries.find((entry) => entry.kind === 'careers' && (entry.id === identity.careerId || entry.name.toLocaleLowerCase('fr-FR') === (identity.career || '').toLocaleLowerCase('fr-FR')));
+  if (!career) return '';
+  const level = findCareerLevel(career, identity.careerLevelId, identity.careerLevel);
+  const levels = getCareerLevels(career);
+  const detailList = (label, values) => values?.length ? `<div class="detail-block"><span>${label}</span><strong>${escapeHTML(values.join(' · '))}</strong></div>` : '';
+  const selectedDetails = level ? [
+    detailList('Compétences du niveau', level.skills),
+    detailList('Talents du niveau', level.talents),
+    detailList('Avancements', level.advancements),
+    detailList('Conditions d’accès', level.entryConditions),
+    detailList('Conditions de sortie', level.exitConditions),
+    detailList('Équipement', level.equipment)
+  ].join('') : '';
+  return `<section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">CARRIÈRE</div><h2>Progression et niveau</h2></div><span class="section-caption">${levels.length} niveau(x) référencé(s)</span></div>
+    <div class="detail-grid">
+      ${detailBlock('Carrière', escapeHTML(career.name))}
+      ${detailBlock('Classe', escapeHTML(career.className || ''))}
+      ${detailBlock('Niveau sélectionné', level ? `${escapeHTML(level.rank)} · ${escapeHTML(level.name)}` : escapeHTML(identity.careerLevel || 'À réassocier'))}
+      ${level?.description ? detailBlock('Description', escapeHTML(level.description)) : ''}
+      ${selectedDetails}
+      ${level?.additionalInformation ? detailBlock('Informations complémentaires', escapeHTML(level.additionalInformation)) : ''}
+      ${!level && levels.length ? detailBlock('Niveaux disponibles', escapeHTML(levels.map((item) => item.name).join(' · '))) : ''}
+      ${!levels.length ? detailBlock('Référentiel', 'Aucun niveau renseigné pour cette carrière.') : ''}
+    </div>
+  </section>`;
+}
+
+export function renderCharacterDetail(character, referenceEntries = []) {
   const { identity, characteristics, secondary, experience, profile } = character;
   const name = getCharacterName(character);
   const xpAvailable = getExperienceAvailable(character);
@@ -35,6 +64,8 @@ export function renderCharacterDetail(character) {
         ${detailBlock('Origine', escapeHTML(identity.origin))}${detailBlock('Religion', escapeHTML(identity.religion))}${detailBlock('Divinité', escapeHTML(identity.deity))}${detailBlock('Niveau de carrière', escapeHTML(identity.careerLevel))}
         ${detailBlock('Taille', escapeHTML(identity.height))}${detailBlock('Poids', escapeHTML(identity.weight))}${detailBlock('Yeux', escapeHTML(identity.eyeColor))}${detailBlock('Cheveux', escapeHTML(identity.hairColor))}
       </div></section>
+
+      ${careerLevelSection(identity, referenceEntries)}
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">CARACTÉRISTIQUES</div><h2>Profil du personnage</h2></div><span class="section-caption">Valeurs saisies manuellement</span></div><div class="stats-grid">${characteristicCards}</div></section>
 
