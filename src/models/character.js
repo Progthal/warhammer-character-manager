@@ -26,16 +26,107 @@ function cleanNumber(value) {
   return Number.isFinite(number) ? Math.max(0, Math.min(9999, Math.round(number))) : null;
 }
 
+function cleanDecimal(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(9999, Math.round(number * 100) / 100)) : null;
+}
+
 function cleanDate(value, fallback) {
   if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return fallback;
   return value;
+}
+
+function cleanId(value) {
+  return cleanText(value, 120) || createId();
+}
+
+function cleanAdvancementList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 500).map((item) => {
+    const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    return {
+      id: cleanId(source.id),
+      name: cleanText(source.name, 160),
+      characteristic: CHARACTERISTICS.some(({ key }) => key === source.characteristic) ? source.characteristic : '',
+      baseValue: cleanNumber(source.baseValue),
+      useCharacteristicBase: source.useCharacteristicBase !== false,
+      advances: cleanNumber(source.advances) ?? 0,
+      advancementCost: cleanNumber(source.advancementCost),
+      career: Boolean(source.career),
+      notes: cleanText(source.notes, 2000)
+    };
+  }).filter((item) => item.name);
+}
+
+function cleanTalents(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 500).map((item) => {
+    const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    const effects = Array.isArray(source.effects) ? source.effects.slice(0, 50).map((effect) => {
+      const entry = effect && typeof effect === 'object' && !Array.isArray(effect) ? effect : {};
+      return {
+        type: entry.type === 'characteristicBonus' ? 'characteristicBonus' : 'none',
+        characteristic: CHARACTERISTICS.some(({ key }) => key === entry.characteristic) ? entry.characteristic : '',
+        value: cleanNumber(entry.value) ?? 0,
+        verified: Boolean(entry.verified),
+        reference: cleanText(entry.reference, 500)
+      };
+    }) : [];
+    return {
+      id: cleanId(source.id),
+      name: cleanText(source.name, 160),
+      rank: Math.max(1, cleanNumber(source.rank) ?? 1),
+      description: cleanText(source.description, 3000),
+      effects,
+      advancementCost: cleanNumber(source.advancementCost),
+      notes: cleanText(source.notes, 2000)
+    };
+  }).filter((item) => item.name);
+}
+
+function cleanEquipmentList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 1000).map((item) => {
+    const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    return {
+      id: cleanId(source.id),
+      name: cleanText(source.name, 160),
+      type: cleanText(source.type, 100),
+      location: cleanText(source.location, 100),
+      damage: cleanText(source.damage, 100),
+      qualities: cleanText(source.qualities, 500),
+      armourPoints: cleanNumber(source.armourPoints),
+      quantity: Math.max(1, cleanNumber(source.quantity) ?? 1),
+      encumbrance: cleanDecimal(source.encumbrance) ?? 0,
+      description: cleanText(source.description, 2000)
+    };
+  }).filter((item) => item.name);
+}
+
+function cleanExperienceHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-1000).map((item) => {
+    const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    return {
+      id: cleanId(source.id),
+      type: ['gain', 'purchase', 'undo'].includes(source.type) ? source.type : 'gain',
+      amount: cleanNumber(source.amount) ?? 0,
+      note: cleanText(source.note, 500),
+      date: cleanDate(source.date, new Date().toISOString()),
+      targetPath: cleanText(source.targetPath, 300),
+      previousValue: cleanNumber(source.previousValue),
+      newValue: cleanNumber(source.newValue),
+      reversedEntryId: cleanText(source.reversedEntryId, 120)
+    };
+  });
 }
 
 export function createCharacter(overrides = {}) {
   const now = new Date().toISOString();
   return normalizeCharacter({
     id: createId(),
-    schemaVersion: 2,
+    schemaVersion: 3,
     identity: {
       firstName: '', lastName: '', species: '', gender: '', age: null,
       height: '', weight: '', eyeColor: '', hairColor: '', origin: '',
@@ -47,7 +138,14 @@ export function createCharacter(overrides = {}) {
       strengthBonus: null, enduranceBonus: null, fate: null, fortune: null,
       resilience: null, resolve: null
     },
-    experience: { total: 0, spent: 0 },
+    experience: { total: 0, spent: 0, history: [] },
+    characteristicAdvances: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, 0])),
+    characteristicAdvancementCosts: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, null])),
+    skills: [],
+    talents: [],
+    equipment: { weapons: [], armour: [], possessions: [], spells: [], prayers: [] },
+    resources: { corruptionPoints: 0 },
+    rules: { encumbranceCapacity: null, corruptionThreshold: null },
     profile: { description: '', history: '', goals: '', notes: '' },
     isDraft: false,
     createdAt: now,
@@ -67,7 +165,7 @@ export function normalizeCharacter(input) {
 
   return {
     id: cleanText(source.id, 100) || createId(),
-    schemaVersion: 2,
+    schemaVersion: 3,
     identity: {
       firstName: cleanText(identity.firstName, 100),
       lastName: cleanText(identity.lastName, 100),
@@ -104,7 +202,30 @@ export function normalizeCharacter(input) {
     },
     experience: {
       total: cleanNumber(experience.total) ?? 0,
-      spent: cleanNumber(experience.spent) ?? 0
+      spent: cleanNumber(experience.spent) ?? 0,
+      history: cleanExperienceHistory(experience.history)
+    },
+    characteristicAdvances: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [
+      key, cleanNumber(source.characteristicAdvances?.[key]) ?? 0
+    ])),
+    characteristicAdvancementCosts: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [
+      key, cleanNumber(source.characteristicAdvancementCosts?.[key])
+    ])),
+    skills: cleanAdvancementList(source.skills),
+    talents: cleanTalents(source.talents),
+    equipment: {
+      weapons: cleanEquipmentList(source.equipment?.weapons),
+      armour: cleanEquipmentList(source.equipment?.armour),
+      possessions: cleanEquipmentList(source.equipment?.possessions),
+      spells: cleanEquipmentList(source.equipment?.spells),
+      prayers: cleanEquipmentList(source.equipment?.prayers)
+    },
+    resources: {
+      corruptionPoints: cleanNumber(source.resources?.corruptionPoints) ?? 0
+    },
+    rules: {
+      encumbranceCapacity: cleanDecimal(source.rules?.encumbranceCapacity),
+      corruptionThreshold: cleanNumber(source.rules?.corruptionThreshold)
     },
     profile: {
       description: cleanText(profile.description, 5000),
@@ -136,7 +257,11 @@ export function validateCharacter(input) {
   const numericEntries = [
     ...Object.entries(input.characteristics),
     ...Object.entries(input.secondary),
-    ...Object.entries(input.experience)
+    ['total', input.experience.total],
+    ['spent', input.experience.spent],
+    ['corruptionPoints', input.resources?.corruptionPoints],
+    ['encumbranceCapacity', input.rules?.encumbranceCapacity],
+    ['corruptionThreshold', input.rules?.corruptionThreshold]
   ];
   for (const [key, value] of numericEntries) {
     if (value !== null && value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 9999)) {
@@ -145,6 +270,54 @@ export function validateCharacter(input) {
   }
   if (typeof input.identity.firstName !== 'string' || typeof input.identity.lastName !== 'string') {
     errors.push('Le prénom et le nom doivent être du texte.');
+  }
+  for (const collection of ['skills', 'talents']) {
+    if (input[collection] !== undefined && !Array.isArray(input[collection])) {
+      errors.push(`La section « ${collection} » doit être une liste.`);
+      continue;
+    }
+    for (const [index, entry] of (input[collection] || []).entries()) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.name !== 'string') {
+        errors.push(`Entrée ${index + 1} invalide dans « ${collection} ».`);
+        continue;
+      }
+      const numericFields = collection === 'skills'
+        ? ['baseValue', 'advances', 'advancementCost']
+        : ['rank', 'advancementCost'];
+      for (const key of numericFields) {
+        const value = entry[key];
+        const minimum = collection === 'talents' && key === 'rank' ? 1 : 0;
+        if (value !== null && value !== undefined && value !== '' && (!Number.isFinite(Number(value)) || Number(value) < minimum || Number(value) > 9999)) {
+          errors.push(`Valeur numérique invalide pour « ${collection}.${key} ». `);
+        }
+      }
+    }
+  }
+  if (input.equipment !== undefined && (!input.equipment || typeof input.equipment !== 'object' || Array.isArray(input.equipment))) {
+    errors.push('La section « equipment » doit être un objet.');
+  } else {
+    for (const category of ['weapons', 'armour', 'possessions', 'spells', 'prayers']) {
+      const entries = input.equipment?.[category];
+      if (entries !== undefined && !Array.isArray(entries)) {
+        errors.push(`La catégorie d’équipement « ${category} » doit être une liste.`);
+        continue;
+      }
+      for (const [index, entry] of (entries || []).entries()) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.name !== 'string') {
+          errors.push(`Objet ${index + 1} invalide dans « equipment.${category} ».`);
+          continue;
+        }
+        for (const key of ['quantity', 'encumbrance', 'armourPoints']) {
+          const value = entry[key];
+          if (value !== null && value !== undefined && value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 9999)) {
+            errors.push(`Valeur numérique invalide pour « equipment.${category}.${key} ».`);
+          }
+        }
+      }
+    }
+  }
+  if (input.experience.history !== undefined && !Array.isArray(input.experience.history)) {
+    errors.push('L’historique d’expérience doit être une liste.');
   }
   return { valid: errors.length === 0, errors };
 }

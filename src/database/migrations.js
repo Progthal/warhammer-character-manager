@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'warhammer-character-manager';
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 
 export function migrateCareerReferenceRecord(record) {
   if (!record || record.kind !== 'careers' || !Array.isArray(record.levels)) return record;
@@ -40,12 +40,45 @@ export function migrateCareerReferenceRecord(record) {
 export function migrateCharacterRecord(record) {
   if (!record || typeof record !== 'object') return record;
   const identity = record.identity && typeof record.identity === 'object' ? record.identity : {};
+  const experience = record.experience && typeof record.experience === 'object' ? record.experience : {};
+  const characteristics = record.characteristics && typeof record.characteristics === 'object' ? record.characteristics : {};
+  const characteristicAdvances = record.characteristicAdvances && typeof record.characteristicAdvances === 'object'
+    ? record.characteristicAdvances
+    : {};
   return {
     ...record,
-    schemaVersion: Math.max(Number(record.schemaVersion) || 1, 2),
+    schemaVersion: 3,
     identity: {
       ...identity,
       careerLevelId: typeof identity.careerLevelId === 'string' ? identity.careerLevelId : ''
+    },
+    characteristics: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
+      key, characteristics[key] ?? null
+    ])),
+    characteristicAdvances: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
+      key, characteristicAdvances[key] ?? 0
+    ])),
+    characteristicAdvancementCosts: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
+      key, record.characteristicAdvancementCosts?.[key] ?? null
+    ])),
+    experience: { ...experience, history: Array.isArray(experience.history) ? experience.history : [] },
+    skills: Array.isArray(record.skills) ? record.skills : [],
+    talents: Array.isArray(record.talents) ? record.talents : [],
+    equipment: {
+      weapons: Array.isArray(record.equipment?.weapons) ? record.equipment.weapons : [],
+      armour: Array.isArray(record.equipment?.armour) ? record.equipment.armour : [],
+      possessions: Array.isArray(record.equipment?.possessions) ? record.equipment.possessions : [],
+      spells: Array.isArray(record.equipment?.spells) ? record.equipment.spells : [],
+      prayers: Array.isArray(record.equipment?.prayers) ? record.equipment.prayers : []
+    },
+    resources: {
+      ...(record.resources && typeof record.resources === 'object' && !Array.isArray(record.resources) ? record.resources : {}),
+      corruptionPoints: record.resources?.corruptionPoints ?? 0
+    },
+    rules: {
+      ...(record.rules && typeof record.rules === 'object' && !Array.isArray(record.rules) ? record.rules : {}),
+      encumbranceCapacity: record.rules?.encumbranceCapacity ?? null,
+      corruptionThreshold: record.rules?.corruptionThreshold ?? null
     }
   };
 }
@@ -89,5 +122,9 @@ export function upgradeDatabase(database, transaction, oldVersion) {
     if (database.objectStoreNames.contains('characters')) {
       migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
     }
+  }
+
+  if (oldVersion >= 3 && oldVersion < 4 && database.objectStoreNames.contains('characters')) {
+    migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
   }
 }

@@ -275,7 +275,7 @@ test('la migration IndexedDB v2 ajoute les référentiels sans supprimer le maga
   };
   const transaction = { objectStore: () => ({ openCursor() { const request = {}; queueMicrotask(() => { request.result = null; request.onsuccess?.(); }); return request; } }) };
   upgradeDatabase(database, transaction, 0);
-  assert.equal(DATABASE_VERSION, 3);
+  assert.equal(DATABASE_VERSION, 4);
   assert.ok(stores.has('characters'));
   assert.ok(stores.has('referenceEntries'));
   assert.ok(stores.has('referenceMeta'));
@@ -308,10 +308,13 @@ test('la migration v3 conserve les valeurs de personnage et ajoute les identifia
     profile: { notes: 'Notes conservées' }
   };
   const migrated = migrateCharacterRecord(oldCharacter);
-  assert.equal(migrated.schemaVersion, 2);
+  assert.equal(migrated.schemaVersion, 3);
   assert.equal(migrated.identity.careerLevel, 'Recrue');
   assert.equal(migrated.identity.careerLevelId, '');
   assert.equal(migrated.profile.notes, 'Notes conservées');
+  assert.deepEqual(migrated.skills, []);
+  assert.equal(migrated.characteristicAdvances.CC, 0);
+  assert.equal(migrated.experience.history.length, 0);
   assert.equal(oldCharacter.identity.careerLevel, 'Recrue');
 });
 

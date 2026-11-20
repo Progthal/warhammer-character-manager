@@ -6,10 +6,14 @@ import { renderCharacterDetail } from '../src/views/character-detail.js';
 
 test('une nouvelle fiche possède les sections attendues sans valeurs de règles inventées', () => {
   const character = createCharacter();
-  assert.equal(character.schemaVersion, 2);
+  assert.equal(character.schemaVersion, 3);
   assert.equal(character.identity.status, 'Actif');
   assert.equal(character.characteristics.CC, null);
   assert.equal(Object.keys(character.characteristics).length, 10);
+  assert.equal(character.characteristicAdvances.CC, 0);
+  assert.deepEqual(character.skills, []);
+  assert.deepEqual(character.equipment.weapons, []);
+  assert.deepEqual(character.experience.history, []);
   assert.equal(CHARACTERISTICS.length, 10);
   assert.equal(validateCharacter(character).valid, true);
 });
@@ -106,4 +110,25 @@ test('la fiche détaillée affiche les informations du niveau référencé par i
   assert.match(html, /Écriture/);
   assert.match(html, /Lecture rapide/);
   assert.match(html, /Savoir lire/);
+});
+
+test('la normalisation préserve compétences, talents, équipement et historique XP lors des imports', () => {
+  const character = normalizeCharacter({
+    experience: { total: 500, spent: 100, history: [{ id: 'xp-1', type: 'gain', amount: 500, note: 'Session' }] },
+    characteristicAdvances: { CC: 3 },
+    skills: [{ id: 'skill-1', name: 'Esquive', characteristic: 'Ag', advances: 2, advancementCost: 25, career: true }],
+    talents: [{ id: 'talent-1', name: 'Réflexes', rank: 2, effects: [{ type: 'characteristicBonus', characteristic: 'Ag', value: 5, verified: true }] }],
+    equipment: { weapons: [{ id: 'weapon-1', name: 'Épée', damage: 'SB+4', encumbrance: 1, quantity: 2 }] },
+    resources: { corruptionPoints: 4 },
+    rules: { corruptionThreshold: 3, encumbranceCapacity: 1 }
+  });
+  const exported = createCharacterExport(character);
+  const [{ character: restored }] = prepareImportedCharacters(parseImportPayload(exported).characters);
+  assert.equal(restored.characteristicAdvances.CC, 3);
+  assert.equal(restored.skills[0].id, 'skill-1');
+  assert.equal(restored.talents[0].effects[0].verified, true);
+  assert.equal(restored.equipment.weapons[0].quantity, 2);
+  assert.equal(restored.experience.history[0].note, 'Session');
+  assert.equal(restored.resources.corruptionPoints, 4);
+  assert.equal(restored.rules.corruptionThreshold, 3);
 });

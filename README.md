@@ -26,7 +26,7 @@ Le référentiel des espèces contient les profils de caractéristiques pour Hum
 
 Chaque carrière contient désormais une liste d’objets `levels`. Chaque niveau possède son propre `id`, le `careerId` parent, un nom, un rang, ses compétences et talents (noms et identifiants), ses avancements, conditions d’accès/de sortie, équipement, description, références et informations complémentaires. Les identifiants des niveaux ne dépendent pas de leur nom. Dans Référentiels, les carrières intégrées proposent l’action **Gérer les niveaux** : leur nom et leur classe restent protégés, mais les niveaux personnalisés peuvent être ajoutés, modifiés, supprimés après confirmation et réordonnés. Les carrières personnalisées disposent des mêmes contrôles.
 
-La base IndexedDB est passée à la version 3. La migration ajoute les magasins de référentiels si nécessaire, convertit les anciennes listes de niveaux texte en objets identifiés, et ajoute `careerLevelId` aux personnages sans effacer leur ancien champ texte `careerLevel`. Les magasins existants et les fiches de personnages sont préservés. Les référentiels intégrés sont versionnés et initialisés automatiquement. Leur installation est append-only : une mise à jour peut ajouter de nouveaux niveaux intégrés aux carrières déjà présentes sans remplacer les niveaux existants. Les identifiants de carrière et de niveau sont stables ; les liens restent basés sur ces identifiants, pas sur les noms.
+La base IndexedDB est passée à la version 4. La migration ajoute les magasins de référentiels si nécessaire, convertit les anciennes listes de niveaux texte en objets identifiés, ajoute `careerLevelId` aux personnages sans effacer leur ancien champ texte `careerLevel`, puis initialise les nouvelles sections de progression, compétences, talents, équipement et ressources. Les magasins existants et les fiches de personnages sont préservés. Les référentiels intégrés sont versionnés et initialisés automatiquement. Leur installation est append-only : une mise à jour peut ajouter de nouveaux niveaux intégrés aux carrières déjà présentes sans remplacer les niveaux existants. Les identifiants de carrière et de niveau sont stables ; les liens restent basés sur ces identifiants, pas sur les noms.
 
 Ouvrez **Référentiels** dans la navigation pour ajouter ou modifier des données personnalisées, associer religions et divinités, compléter les niveaux et détails des carrières, configurer les dix modificateurs d’une espèce, supprimer une entrée personnalisée ou exporter vos données. Dans une carrière, ajoutez plusieurs niveaux puis renseignez leurs compétences, talents, avancements, conditions et informations complémentaires. Les niveaux sont réordonnables ; leur rang suit leur position. Les imports sont ajoutés comme un nouveau pack avec des identifiants propres ; les identifiants de carrière et de niveau sont remappés et les niveaux restent associés à leur carrière importée. Les imports ne remplacent jamais les entrées déjà présentes. Les cartes distinguent les sources intégrées, personnalisées et importées. L’export inclut les données personnalisées, les packs et les profils d’espèce intégrés que vous avez ajustés, mais exclut les données intégrées non modifiées.
 
@@ -48,6 +48,20 @@ Le format d’un pack est versionné indépendamment des sauvegardes de personna
 Les anciennes fiches qui ne contiennent que les champs texte `religion`, `deity`, `career` et `careerLevel` restent valides. Si le nom d’une carrière ou d’un niveau correspond sans ambiguïté à une entrée, l’éditeur peut la relier à son identifiant stable. Sinon, l’ancienne valeur textuelle est conservée et affichée comme valeur à réassocier ; elle n’est pas supprimée lors de la migration. Les champs texte restent présents dans le format des personnages pour compatibilité avec les sauvegardes existantes. Le nouveau champ `identity.careerLevelId` est enregistré en plus de `identity.careerLevel`.
 
 Les caractéristiques restent vides à la création et peuvent toujours être saisies à la main. Dans le formulaire de création ou d’édition, le bouton représentant un dé génère un aperçu des dix jets de l’étape 1 avec `2d10 + modificateur d’espèce`. Pour cette méthode, la plage naturelle d’une caractéristique va de `2 + modificateur` à `20 + modificateur`. Les jets, leur modificateur et le total sont présentés avant application. Une confirmation est demandée si des valeurs sont déjà présentes ; **Relancer** remplace uniquement l’aperçu, **Annuler** conserve les champs et **Confirmer** applique les dix résultats. Les champs restent ensuite indépendants et modifiables. Le livre de règles attribue normalement 50 XP si les jets de l’étape 1 sont conservés dans leur ordre ; cette fonctionnalité laisse volontairement l’expérience intacte. Les étapes optionnelles de réarrangement et d’allocation de 100 points (de 4 à 18 points par caractéristique avant ajout du modificateur) ne sont pas incluses dans ce générateur.
+
+## Fiche enrichie, calculs et progression
+
+La fiche distingue désormais, pour chaque caractéristique, la valeur initiale, les bonus structurés provenant de talents, les augmentations achetées, la valeur actuelle et le bonus correspondant au chiffre des dizaines. Les anciennes fiches sont migrées sans changement de leur valeur : leurs caractéristiques deviennent les valeurs initiales et leurs augmentations commencent à zéro. Les effets de talent ne sont appliqués que lorsqu’ils sont définis comme bonus de caractéristique, associés à une caractéristique, explicitement marqués comme vérifiés et accompagnés d’une référence de règle renseignée.
+
+Les compétences peuvent être liées à une caractéristique. Leur valeur est calculée à partir de la caractéristique actuelle et des augmentations saisies ; une base manuelle reste possible pour les compétences qui ne doivent pas reprendre automatiquement une caractéristique. Les talents disposent d’un rang, d’une description, d’un coût d’avancement configurable et, si nécessaire, d’un effet mécanique structuré avec sa référence. Les compétences et talents peuvent être ajoutés et supprimés depuis l’éditeur.
+
+L’équipement est réparti entre armes, armures, possessions, sorts et prières. L’encombrement total est la somme des encombrements unitaires multipliés par les quantités. La capacité peut être renseignée dans la fiche afin d’afficher le dépassement éventuel. Les points de corruption et leur seuil peuvent également être suivis et comparés. Ces valeurs de capacité et de seuil restent explicites et configurables : aucune formule d’encombrement ou de corruption non vérifiée n’est appliquée.
+
+Les gains d’XP et les achats de progression sont inscrits dans un historique. L’application contrôle le solde avant un achat de caractéristique, de compétence ou de rang de talent. Le coût doit être renseigné explicitement pour la caractéristique, la compétence ou le talent à progresser ; aucun barème ni coût WFRP4e n’est inventé ou prérempli. **Annuler le dernier achat** restaure la progression et les XP dépensés, avec un contrôle qui refuse l’annulation si la valeur cible a changé depuis l’achat.
+
+Le sélecteur de thème en haut de page bascule entre une ambiance anthracite et un thème parchemin. Le choix est conservé dans LocalStorage. Les polices médiévales sont recherchées localement avec des alternatives système (Georgia/Palatino) ; aucune police distante n’est requise pour fonctionner hors ligne.
+
+Les blessures maximales et le mouvement restent des valeurs manuelles. Les formules dépendant de l’espèce, les coûts par palier WFRP4e, les conditions d’accès aux carrières et les effets mécaniques non structurés doivent encore être vérifiés avant de les automatiser. Les effets de talents non vérifiés sont ignorés dans les calculs.
 
 ## Lancer l'application
 
@@ -98,7 +112,7 @@ npm test
 npm run check
 ```
 
-Les tests couvrent le modèle de personnage, la validation et la migration des niveaux structurés, les niveaux multiples, leurs identifiants stables, l’import/export des packs, la fusion append-only des référentiels, les valeurs de personnages historiques et la validation des imports. La persistance IndexedDB réelle, la fermeture/réouverture du navigateur et l'installation PWA doivent également être vérifiées dans un navigateur.
+Les tests couvrent le modèle de personnage, les calculs de caractéristiques et de compétences, les talents vérifiés, l’encombrement, le seuil de corruption, les gains et achats d’XP, l’annulation d’un achat, la migration des niveaux structurés, l’import/export, les référentiels et la validation des imports. La persistance IndexedDB réelle, la fermeture/réouverture du navigateur et l'installation PWA doivent également être vérifiées dans un navigateur.
 
 Les tests de génération injectent une source aléatoire déterministe et vérifient les vingt dés, les dix caractéristiques, les cinq profils intégrés, les alias, les limites et le rejet des profils incomplets.
 
@@ -123,9 +137,12 @@ src/
     character.js
   rules/
     characteristic-generator.js
+    character-calculations.js
   services/
     import-export.js
     reference-catalog.js
+    progression.js
+    theme.js
   utils/
     format.js
   views/
@@ -139,6 +156,8 @@ data/
   species.json
 tests/character.test.mjs
 tests/characteristic-generator.test.mjs
+tests/character-calculations.test.mjs
+tests/progression.test.mjs
 tests/reference-catalog.test.mjs
 ```
 

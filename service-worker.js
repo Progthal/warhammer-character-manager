@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'wcm-shell-';
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
@@ -14,9 +14,12 @@ const APP_SHELL = [
   './src/router.js',
   './src/models/character.js',
   './src/rules/characteristic-generator.js',
+  './src/rules/character-calculations.js',
   './src/database/migrations.js',
   './src/database/indexeddb.js',
   './src/services/import-export.js',
+  './src/services/progression.js',
+  './src/services/theme.js',
   './src/services/reference-catalog.js',
   './src/utils/format.js',
   './src/views/dashboard.js',
