@@ -1,0 +1,62 @@
+{
+  "kind": "species",
+  "schemaVersion": 1,
+  "version": 1,
+  "entries": [
+    {
+      "id": "builtin:species:human",
+      "name": "Humain",
+      "description": "Profil de caractéristiques humain de WFRP4e.",
+      "aliases": ["Humain (Reiklander)", "Human"],
+      "characteristicModifiers": {
+        "CC": 20, "CT": 20, "F": 20, "E": 20, "I": 20,
+        "Ag": 20, "Dex": 20, "Int": 20, "FM": 20, "Soc": 20
+      },
+      "references": ["Warhammer Fantasy Roleplay, 4th Edition, Rulebook, Character II, p. 33 (Attributes Table)."]
+    },
+    {
+      "id": "builtin:species:dwarf",
+      "name": "Nain",
+      "description": "Profil de caractéristiques nain de WFRP4e.",
+      "aliases": ["Nains", "Dwarf", "Dwarfs"],
+      "characteristicModifiers": {
+        "CC": 30, "CT": 20, "F": 20, "E": 30, "I": 20,
+        "Ag": 10, "Dex": 30, "Int": 20, "FM": 40, "Soc": 10
+      },
+      "references": ["Warhammer Fantasy Roleplay, 4th Edition, Rulebook, Character II, p. 33 (Attributes Table)."]
+    },
+    {
+      "id": "builtin:species:halfling",
+      "name": "Halfling",
+      "description": "Profil de caractéristiques halfling de WFRP4e.",
+      "aliases": ["Halfeling", "Halflings"],
+      "characteristicModifiers": {
+        "CC": 10, "CT": 30, "F": 10, "E": 20, "I": 20,
+        "Ag": 20, "Dex": 30, "Int": 20, "FM": 30, "Soc": 30
+      },
+      "references": ["Warhammer Fantasy Roleplay, 4th Edition, Rulebook, Character II, p. 33 (Attributes Table)."]
+    },
+    {
+      "id": "builtin:species:high-elf",
+      "name": "Haut Elfe",
+      "description": "Profil de caractéristiques elfique partagé par les Hauts Elfes et les Elfes sylvains en WFRP4e.",
+      "aliases": ["Elfe", "High Elf", "Hauts Elfes"],
+      "characteristicModifiers": {
+        "CC": 30, "CT": 30, "F": 20, "E": 20, "I": 40,
+        "Ag": 30, "Dex": 30, "Int": 30, "FM": 30, "Soc": 20
+      },
+      "references": ["Warhammer Fantasy Roleplay, 4th Edition, Rulebook, Character II, p. 33 (Attributes Table).", "The Role Players Guild, WFRP 4e Species Guide (table des modificateurs)."]
+    },
+    {
+      "id": "builtin:species:wood-elf",
+      "name": "Elfe sylvain",
+      "description": "Le profil de caractéristiques elfique de WFRP4e est commun aux Elfes sylvains et aux Hauts Elfes.",
+      "aliases": ["Wood Elf", "Wood Elves", "Elfes sylvains"],
+      "characteristicModifiers": {
+        "CC": 30, "CT": 30, "F": 20, "E": 20, "I": 40,
+        "Ag": 30, "Dex": 30, "Int": 30, "FM": 30, "Soc": 20
+      },
+      "references": ["Warhammer Fantasy Roleplay, 4th Edition, Rulebook, Character II, p. 33 (Attributes Table).", "The Role Players Guild, WFRP 4e Species Guide (table des modificateurs)."]
+    }
+  ]
+}

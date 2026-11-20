@@ -21,27 +21,31 @@ import { upgradeDatabase, DATABASE_VERSION, migrateCareerReferenceRecord, migrat
 import { mergeBuiltInCareerLevels } from '../src/database/indexeddb.js';
 import { renderCareerLevelsEditor, renderReferenceEditor, renderReferenceManager } from '../src/views/reference-manager.js';
 
-const kinds = ['religions', 'deities', 'careers'];
+const kinds = ['religions', 'deities', 'careers', 'species'];
 const datasets = Object.fromEntries(await Promise.all(kinds.map(async (kind) => [
   kind,
   JSON.parse(await readFile(new URL(`../data/${kind}.json`, import.meta.url), 'utf8'))
 ])));
 const builtins = kinds.flatMap((kind) => datasets[kind].entries.map((entry) => ({ ...entry, kind, source: 'builtin' })));
 
-test('les trois référentiels initiaux sont lisibles, structurés et identifiés de façon stable', () => {
+test('les référentiels initiaux sont lisibles, structurés et identifiés de façon stable', () => {
   assert.equal(datasets.religions.entries.length, 10);
   assert.equal(datasets.deities.entries.length, 10);
   assert.equal(datasets.careers.entries.length, 64);
   assert.equal(datasets.careers.schemaVersion, 2);
   assert.equal(datasets.careers.version, 2);
+  assert.equal(datasets.species.entries.length, 5);
+  assert.equal(datasets.species.schemaVersion, 1);
+  assert.equal(datasets.species.version, 1);
   for (const kind of kinds) {
     const result = validateReferenceEntries(datasets[kind].entries.map((entry) => ({ ...entry, kind })), { existingEntries: builtins });
     assert.equal(result.valid, true, result.errors.join('; '));
   }
   assert.ok(datasets.careers.entries.every((career) => career.levels === undefined || Array.isArray(career.levels)));
+  assert.ok(datasets.species.entries.every((species) => Object.keys(species.characteristicModifiers).length === 10));
 });
 
-test('le chargement automatique récupère les trois jeux JSON versionnés', async () => {
+test('le chargement automatique récupère les quatre jeux JSON versionnés', async () => {
   const originalFetch = globalThis.fetch;
   const requested = [];
   globalThis.fetch = async (url) => {
@@ -51,8 +55,9 @@ test('le chargement automatique récupère les trois jeux JSON versionnés', asy
   };
   try {
     const loaded = await loadBuiltInReferenceData();
-    assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions']);
+    assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions', 'species']);
     assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 2);
+    assert.equal(loaded.find((dataset) => dataset.kind === 'species').version, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -151,6 +156,43 @@ test('l’administration affiche la gestion des niveaux des carrières intégré
   assert.match(editor, /nom et la classe de cette carrière intégrée sont protégés/);
   assert.doesNotMatch(editor, /name="className"/);
   assert.match(renderCareerLevelsEditor([]), /Aucun niveau renseigné/);
+});
+
+test('les profils intégrés d’espèce sont configurables sans déverrouiller leur nom', () => {
+  const species = { ...builtins.find((entry) => entry.kind === 'species'), characteristicModifiers: { CC: 30 } };
+  const html = renderReferenceManager([species]);
+  const editor = renderReferenceEditor('species', species, [species]);
+  assert.match(html, /Espèces/);
+  assert.match(html, /Configurer/);
+  assert.match(editor, /Modificateur à ajouter à 2d10/);
+  assert.match(editor, /Le nom et la provenance de cette espèce restent protégés/);
+  assert.match(editor, /type="hidden" name="name"/);
+  assert.doesNotMatch(editor, /<input name="name"/);
+  assert.match(editor, /name="characteristicModifier\.Soc"/);
+});
+
+test('un profil personnalisé d’espèce conserve ses dix modificateurs et ses alias', () => {
+  const species = createCustomReference('species', {
+    name: 'Gnome', aliases: ['Gnomes'],
+    characteristicModifiers: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [key, 15]))
+  });
+  assert.equal(species.kind, 'species');
+  assert.equal(species.aliases[0], 'Gnomes');
+  assert.deepEqual(Object.values(species.characteristicModifiers), Array(10).fill(15));
+});
+
+test('un profil intégré ajusté est inclus dans un export de référentiels', () => {
+  const species = normalizeReference('species', {
+    ...datasets.species.entries[0],
+    customized: true,
+    characteristicModifiers: { ...datasets.species.entries[0].characteristicModifiers, CC: 25 }
+  }, { source: 'builtin' });
+  const exported = exportCustomReferencePack([species]);
+  assert.equal(exported.pack.entries.length, 1);
+  assert.equal(exported.pack.entries[0].kind, 'species');
+  assert.equal(exported.pack.entries[0].characteristicModifiers.CC, 25);
+  assert.equal(Object.hasOwn(exported.pack.entries[0], 'customized'), false);
+  assert.equal(exportCustomReferencePack([builtins.find((entry) => entry.kind === 'species')]).pack.entries.length, 0);
 });
 
 test('les relations personnalisées se synchronisent sans modifier les entrées intégrées', () => {

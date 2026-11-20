@@ -9,6 +9,7 @@ L'application est composée de fichiers statiques HTML, CSS et JavaScript natif.
 - Tableau de bord des personnages avec recherche, tri et indicateurs.
 - Création d'une fiche, modification avec sauvegarde automatique, duplication et suppression après confirmation.
 - Fiche détaillée : identité, carrière, expérience, caractéristiques principales et secondaires, chronique personnelle.
+- Génération facultative des dix caractéristiques principales depuis l’icône de dé : deux dés à dix faces par caractéristique, auxquels s’ajoute le modificateur de l’espèce.
 - Export JSON d'une fiche ou de l'ensemble du registre.
 - Import JSON versionné avec validation et protection contre l'écrasement des identifiants existants. En cas de collision, la fiche importée est ajoutée comme une copie.
 - Stockage IndexedDB versionné avec index de recherche et point d'entrée pour les migrations.
@@ -17,15 +18,17 @@ L'application est composée de fichiers statiques HTML, CSS et JavaScript natif.
 
 ## Référentiels locaux (phase 2)
 
-Les fiches de personnage utilisent maintenant des référentiels intégrés pour les religions, les divinités et les carrières. Les champs correspondants sont des sélecteurs avec recherche, navigation au clavier, sélection au toucher ou à la souris, informations complémentaires et effacement explicite. La divinité est filtrée selon la religion ; en cas de changement incompatible, l’application demande confirmation avant de l’effacer. Une carrière affiche sa classe et ses informations disponibles ; ses niveaux sont récupérés par identifiant stable, sélectionnables dans une liste déroulante et enregistrés avec leur nom et leur identifiant.
+Les fiches de personnage utilisent des référentiels intégrés pour les religions, les divinités, les carrières et les espèces. Les champs correspondants sont des sélecteurs avec recherche, navigation au clavier, sélection au toucher ou à la souris, informations complémentaires et effacement explicite. La divinité est filtrée selon la religion ; en cas de changement incompatible, l’application demande confirmation avant de l’effacer. Une carrière affiche sa classe et ses informations disponibles ; ses niveaux sont récupérés par identifiant stable, sélectionnables dans une liste déroulante et enregistrés avec leur nom et leur identifiant.
 
-Les fichiers de départ sont `data/religions.json`, `data/deities.json` et `data/careers.json`. Les religions et divinités intégrées forment une base synthétique et partielle de dix cultes humains du Vieux Monde ; elles ne prétendent pas couvrir tous les panthéons. Les 64 noms de carrières et leurs classes sont repris d’une aide de jeu française secondaire, référencée dans `data/careers.json` et dans la page des Référentiels : les intitulés français peuvent varier suivant la traduction et doivent être vérifiés dans l’ouvrage utilisé. La source consultée ne contient pas les niveaux détaillés des carrières. Aucun niveau officiel, profil de compétences, talent, avancement, condition ou équipement n’est inventé : l’application permet désormais de saisir ces éléments manuellement à partir de sources vérifiées.
+Les fichiers de départ sont `data/religions.json`, `data/deities.json`, `data/careers.json` et `data/species.json`. Les religions et divinités intégrées forment une base synthétique et partielle de dix cultes humains du Vieux Monde ; elles ne prétendent pas couvrir tous les panthéons. Les 64 noms de carrières et leurs classes sont repris d’une aide de jeu française secondaire, référencée dans `data/careers.json` et dans la page des Référentiels : les intitulés français peuvent varier suivant la traduction et doivent être vérifiés dans l’ouvrage utilisé. La source consultée ne contient pas les niveaux détaillés des carrières. Aucun niveau officiel, profil de compétences, talent, avancement, condition ou équipement n’est inventé : l’application permet désormais de saisir ces éléments manuellement à partir de sources vérifiées.
+
+Le référentiel des espèces contient les profils de caractéristiques pour Humain, Nain, Halfling, Haut Elfe et Elfe sylvain. Les modificateurs sont ceux de la table « Attributes Table » du livre de base WFRP4e anglais (Character II, p. 33) : les deux profils elfiques sont identiques pour les dix caractéristiques. Les modificateurs intégrés peuvent être vérifiés et ajustés dans **Référentiels → Espèces → Configurer**. Les profils personnalisés et leurs alias peuvent être ajoutés depuis cette même page. Les anciennes fiches indiquant simplement « Elfe » sont reconnues comme Haut Elfe ; leurs jets restent identiques à ceux d’un Elfe sylvain.
 
 Chaque carrière contient désormais une liste d’objets `levels`. Chaque niveau possède son propre `id`, le `careerId` parent, un nom, un rang, ses compétences et talents (noms et identifiants), ses avancements, conditions d’accès/de sortie, équipement, description, références et informations complémentaires. Les identifiants des niveaux ne dépendent pas de leur nom. Dans Référentiels, les carrières intégrées proposent l’action **Gérer les niveaux** : leur nom et leur classe restent protégés, mais les niveaux personnalisés peuvent être ajoutés, modifiés, supprimés après confirmation et réordonnés. Les carrières personnalisées disposent des mêmes contrôles.
 
 La base IndexedDB est passée à la version 3. La migration ajoute les magasins de référentiels si nécessaire, convertit les anciennes listes de niveaux texte en objets identifiés, et ajoute `careerLevelId` aux personnages sans effacer leur ancien champ texte `careerLevel`. Les magasins existants et les fiches de personnages sont préservés. Les référentiels intégrés sont versionnés et initialisés automatiquement. Leur installation est append-only : une mise à jour peut ajouter de nouveaux niveaux intégrés aux carrières déjà présentes sans remplacer les niveaux existants. Les identifiants de carrière et de niveau sont stables ; les liens restent basés sur ces identifiants, pas sur les noms.
 
-Ouvrez **Référentiels** dans la navigation pour ajouter ou modifier des données personnalisées, associer religions et divinités, compléter les niveaux et détails des carrières, supprimer une entrée personnalisée ou exporter vos données. Dans une carrière, ajoutez plusieurs niveaux puis renseignez leurs compétences, talents, avancements, conditions et informations complémentaires. Les niveaux sont réordonnables ; leur rang suit leur position. Les imports sont ajoutés comme un nouveau pack avec des identifiants propres ; les identifiants de carrière et de niveau sont remappés et les niveaux restent associés à leur carrière importée. Les imports ne remplacent jamais les entrées déjà présentes. Les cartes distinguent les sources intégrées, personnalisées et importées. L’export inclut les données personnalisées et les packs, mais exclut les données intégrées.
+Ouvrez **Référentiels** dans la navigation pour ajouter ou modifier des données personnalisées, associer religions et divinités, compléter les niveaux et détails des carrières, configurer les dix modificateurs d’une espèce, supprimer une entrée personnalisée ou exporter vos données. Dans une carrière, ajoutez plusieurs niveaux puis renseignez leurs compétences, talents, avancements, conditions et informations complémentaires. Les niveaux sont réordonnables ; leur rang suit leur position. Les imports sont ajoutés comme un nouveau pack avec des identifiants propres ; les identifiants de carrière et de niveau sont remappés et les niveaux restent associés à leur carrière importée. Les imports ne remplacent jamais les entrées déjà présentes. Les cartes distinguent les sources intégrées, personnalisées et importées. L’export inclut les données personnalisées, les packs et les profils d’espèce intégrés que vous avez ajustés, mais exclut les données intégrées non modifiées.
 
 Le format d’un pack est versionné indépendamment des sauvegardes de personnages :
 
@@ -44,7 +47,7 @@ Le format d’un pack est versionné indépendamment des sauvegardes de personna
 
 Les anciennes fiches qui ne contiennent que les champs texte `religion`, `deity`, `career` et `careerLevel` restent valides. Si le nom d’une carrière ou d’un niveau correspond sans ambiguïté à une entrée, l’éditeur peut la relier à son identifiant stable. Sinon, l’ancienne valeur textuelle est conservée et affichée comme valeur à réassocier ; elle n’est pas supprimée lors de la migration. Les champs texte restent présents dans le format des personnages pour compatibilité avec les sauvegardes existantes. Le nouveau champ `identity.careerLevelId` est enregistré en plus de `identity.careerLevel`.
 
-Les valeurs de caractéristiques sont laissées vides à la création. Cette version ne prétend pas calculer les règles de création WFRP4e : aucun profil de départ ni coût d'avancement arbitraire n'est injecté.
+Les caractéristiques restent vides à la création et peuvent toujours être saisies à la main. Dans le formulaire de création ou d’édition, le bouton représentant un dé génère un aperçu des dix jets de l’étape 1 avec `2d10 + modificateur d’espèce`. Pour cette méthode, la plage naturelle d’une caractéristique va de `2 + modificateur` à `20 + modificateur`. Les jets, leur modificateur et le total sont présentés avant application. Une confirmation est demandée si des valeurs sont déjà présentes ; **Relancer** remplace uniquement l’aperçu, **Annuler** conserve les champs et **Confirmer** applique les dix résultats. Les champs restent ensuite indépendants et modifiables. Le livre de règles attribue normalement 50 XP si les jets de l’étape 1 sont conservés dans leur ordre ; cette fonctionnalité laisse volontairement l’expérience intacte. Les étapes optionnelles de réarrangement et d’allocation de 100 points (de 4 à 18 points par caractéristique avant ajout du modificateur) ne sont pas incluses dans ce générateur.
 
 ## Lancer l'application
 
@@ -97,6 +100,8 @@ npm run check
 
 Les tests couvrent le modèle de personnage, la validation et la migration des niveaux structurés, les niveaux multiples, leurs identifiants stables, l’import/export des packs, la fusion append-only des référentiels, les valeurs de personnages historiques et la validation des imports. La persistance IndexedDB réelle, la fermeture/réouverture du navigateur et l'installation PWA doivent également être vérifiées dans un navigateur.
 
+Les tests de génération injectent une source aléatoire déterministe et vérifient les vingt dés, les dix caractéristiques, les cinq profils intégrés, les alias, les limites et le rejet des profils incomplets.
+
 ## Architecture
 
 ```text
@@ -116,6 +121,8 @@ src/
     reference-picker.js
   models/
     character.js
+  rules/
+    characteristic-generator.js
   services/
     import-export.js
     reference-catalog.js
@@ -129,7 +136,9 @@ data/
   religions.json
   deities.json
   careers.json
+  species.json
 tests/character.test.mjs
+tests/characteristic-generator.test.mjs
 tests/reference-catalog.test.mjs
 ```
 

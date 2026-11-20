@@ -1,9 +1,9 @@
 import { escapeHTML } from '../utils/format.js';
 
-const KIND_LABELS = { religions: 'Religions', deities: 'Divinités', careers: 'Carrières' };
+const KIND_LABELS = { religions: 'Religions', deities: 'Divinités', careers: 'Carrières', species: 'Espèces' };
 
 function sourceBadge(entry) {
-  const label = entry.source === 'builtin' ? 'Donnée intégrée' : entry.source === 'pack' ? 'Pack importé' : 'Donnée personnalisée';
+  const label = entry.source === 'builtin' ? (entry.customized ? 'Profil ajusté' : 'Donnée intégrée') : entry.source === 'pack' ? 'Pack importé' : 'Donnée personnalisée';
   const className = entry.source === 'builtin' ? 'source-badge source-builtin' : entry.source === 'pack' ? 'source-badge source-pack' : 'source-badge source-custom';
   return `<span class="${className}">${label}</span>`;
 }
@@ -18,9 +18,12 @@ function referenceCard(entry, allEntries) {
     ? [entry.className, entry.levels?.length ? `${entry.levels.length} niveau(x) : ${entry.levels.map((level) => typeof level === 'string' ? level : level.name).filter(Boolean).join(', ')}` : 'Aucun niveau renseigné'].filter(Boolean).join(' · ')
     : entry.kind === 'deities'
       ? (entry.domains || []).join(' · ')
-      : entry.origin;
+      : entry.kind === 'species'
+        ? Object.entries(entry.characteristicModifiers || {}).map(([key, value]) => `${key} ${Number.isInteger(value) ? `+${value}` : 'à définir'}`).join(' · ')
+        : entry.origin;
   const editable = entry.source !== 'builtin';
   const manageCareerLevels = entry.kind === 'careers';
+  const manageSpeciesProfile = entry.kind === 'species';
   return `<article class="reference-card" data-entry-card data-kind="${entry.kind}" data-search="${escapeHTML(`${entry.name} ${detail || ''} ${entry.description || ''}`.toLocaleLowerCase('fr-FR'))}">
     <div class="reference-card-top"><span class="reference-kind">${KIND_LABELS[entry.kind]}</span>${sourceBadge(entry)}</div>
     <h3>${escapeHTML(entry.name)}</h3>
@@ -28,28 +31,29 @@ function referenceCard(entry, allEntries) {
     ${linkedNames.length ? `<p class="reference-card-meta">Associé à : ${escapeHTML(linkedNames.join(' · '))}</p>` : ''}
     <p class="reference-card-description">${escapeHTML(entry.description || 'Aucune description renseignée.')}</p>
     ${entry.references?.length ? `<p class="reference-card-source">Source : ${escapeHTML(entry.references.join(' · '))}</p>` : ''}
-    <div class="reference-card-actions">${editable || manageCareerLevels ? `<button class="button button-outline" type="button" data-action="edit-reference" data-id="${escapeHTML(entry.id)}">${editable ? 'Modifier' : 'Gérer les niveaux'}</button>` : '<span class="reference-immutable">Référence protégée</span>'}${editable ? `<button class="icon-button icon-button-danger" type="button" data-action="delete-reference" data-id="${escapeHTML(entry.id)}" aria-label="Supprimer ${escapeHTML(entry.name)}" title="Supprimer">×</button>` : ''}</div>
+    <div class="reference-card-actions">${editable || manageCareerLevels || manageSpeciesProfile ? `<button class="button button-outline" type="button" data-action="edit-reference" data-id="${escapeHTML(entry.id)}">${editable ? 'Modifier' : manageSpeciesProfile ? 'Configurer' : 'Gérer les niveaux'}</button>` : '<span class="reference-immutable">Référence protégée</span>'}${editable ? `<button class="icon-button icon-button-danger" type="button" data-action="delete-reference" data-id="${escapeHTML(entry.id)}" aria-label="Supprimer ${escapeHTML(entry.name)}" title="Supprimer">×</button>` : ''}</div>
   </article>`;
 }
 
 export function renderReferenceManager(entries) {
   const sorted = [...entries].sort((a, b) => KIND_LABELS[a.kind].localeCompare(KIND_LABELS[b.kind], 'fr') || a.name.localeCompare(b.name, 'fr'));
-  const counts = Object.fromEntries(['religions', 'deities', 'careers'].map((kind) => [kind, entries.filter((entry) => entry.kind === kind).length]));
+  const counts = Object.fromEntries(['religions', 'deities', 'careers', 'species'].map((kind) => [kind, entries.filter((entry) => entry.kind === kind).length]));
   return `<section class="reference-page">
-    <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> BIBLIOTHÈQUE LOCALE</div><h1>Référentiels <em>de données</em></h1><p class="page-intro">Choisissez les religions, divinités et carrières depuis les données intégrées ou vos propres extensions.</p></div><div class="heading-seal" aria-hidden="true"><span>✧</span><small>DATA<br>BOOK</small></div></div>
+    <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> BIBLIOTHÈQUE LOCALE</div><h1>Référentiels <em>de données</em></h1><p class="page-intro">Choisissez les religions, divinités, carrières et espèces depuis les données intégrées ou vos propres extensions.</p></div><div class="heading-seal" aria-hidden="true"><span>✧</span><small>DATA<br>BOOK</small></div></div>
     <div class="reference-summary-grid">
       <article class="reference-summary"><span>Religions</span><strong>${counts.religions}</strong><button type="button" data-action="add-reference" data-kind="religions">＋ Ajouter</button></article>
       <article class="reference-summary"><span>Divinités</span><strong>${counts.deities}</strong><button type="button" data-action="add-reference" data-kind="deities">＋ Ajouter</button></article>
       <article class="reference-summary"><span>Carrières</span><strong>${counts.careers}</strong><button type="button" data-action="add-reference" data-kind="careers">＋ Ajouter</button></article>
+      <article class="reference-summary"><span>Espèces</span><strong>${counts.species}</strong><button type="button" data-action="add-reference" data-kind="species">＋ Ajouter</button></article>
     </div>
     <section class="reference-library">
       <div class="section-heading"><div><div class="eyebrow">CATALOGUE</div><h2>Entrées disponibles</h2></div><div class="reference-tools"><button type="button" class="button button-outline" data-action="export-references">⇩ Exporter mes données</button><button type="button" class="button button-outline" data-action="import-references">⇧ Importer un pack</button></div></div>
-      <div class="toolbar reference-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="reference-search" type="search" placeholder="Rechercher un élément…" autocomplete="off"></label><label class="filter-select"><span>Type</span><select id="reference-kind-filter"><option value="all">Tous les types</option><option value="religions">Religions</option><option value="deities">Divinités</option><option value="careers">Carrières</option></select></label></div>
+      <div class="toolbar reference-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="reference-search" type="search" placeholder="Rechercher un élément…" autocomplete="off"></label><label class="filter-select"><span>Type</span><select id="reference-kind-filter"><option value="all">Tous les types</option><option value="religions">Religions</option><option value="deities">Divinités</option><option value="careers">Carrières</option><option value="species">Espèces</option></select></label></div>
       <p class="reference-results-count" id="reference-results-count">${sorted.length} entrée${sorted.length > 1 ? 's' : ''}</p>
       <div class="reference-grid" id="reference-grid">${sorted.map((entry) => referenceCard(entry, sorted)).join('') || '<div class="empty-state"><h3>Aucune donnée</h3><p>Ajoutez une entrée ou importez un pack JSON.</p></div>'}</div>
     </section>
     <aside class="reference-legend"><strong>Origine des données</strong><span><i class="legend-dot legend-builtin"></i> Intégrées : fournies avec l’application et protégées</span><span><i class="legend-dot legend-custom"></i> Personnalisées : créées ou modifiées ici</span><span><i class="legend-dot legend-pack"></i> Packs : importés depuis un fichier JSON</span></aside>
-    <p class="reference-disclaimer">La liste des religions intégrée est une base initiale partielle, limitée à dix cultes humains du Vieux Monde ; elle ne prétend pas couvrir tous les panthéons ou cultes du cadre. Les 64 carrières et leurs classes reprennent la liste de l’aide de jeu française <a href="https://www.feldo.fr/2019/08/20/warhammer-4-recap-sur-creation-de-perso-par-zeptitlink/" target="_blank" rel="noopener noreferrer">Création de personnages WFRP4e (2019)</a>, à vérifier avec votre traduction du livre de base. Cette source ne fournit pas les niveaux détaillés des carrières : seuls les niveaux vérifiés et renseignés par l’utilisateur sont proposés. Aucun niveau, profil, talent ou équipement officiel n’est inventé ni reproduit sans source autorisée.</p>
+    <p class="reference-disclaimer">Les profils de caractéristiques des cinq espèces reprennent la table « Attributes Table » du livre de base anglais WFRP4e (Character II, p. 33) : chaque valeur est calculée avec 2d10 et un modificateur d’espèce. Les Hauts Elfes et les Elfes sylvains partagent ce profil. Les modificateurs intégrés peuvent être vérifiés et modifiés ici. Les profils personnalisés sont également acceptés. La liste des religions intégrée reste partielle ; les 64 carrières et leurs classes reprennent une aide de jeu française secondaire et doivent être vérifiées avec l’ouvrage utilisé. Aucun niveau de carrière, profil de compétences, talent ou équipement officiel n’est inventé.</p>
   </section>`;
 }
 
@@ -109,20 +113,26 @@ export function renderReferenceEditor(kind, entry, allEntries, { levelsOnly = fa
   const isEdit = Boolean(entry);
   const value = entry || {};
   let specificFields = '';
+  const speciesOnly = value.source === 'builtin' && kind === 'species';
   if (kind === 'religions') {
     specificFields = `${inputField('Origine ou région d’influence', 'origin', value.origin, { placeholder: 'Facultatif' })}${textareaField('Particularités', 'particularities', value.particularities)}${relationshipSelect('Divinités associées', 'deityIds', allEntries, value.deityIds, 'deities')}`;
   } else if (kind === 'deities') {
     specificFields = `${textareaField('Domaines d’influence', 'domains', value.domains)}${textareaField('Symboles', 'symbols', value.symbols)}${textareaField('Informations complémentaires', 'additionalInformation', value.additionalInformation ? [value.additionalInformation] : [])}${relationshipSelect('Religions associées', 'religionIds', allEntries, value.religionIds, 'religions')}`;
+  } else if (kind === 'species') {
+    const modifierFields = ['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => (
+      `<label class="form-field"><span>${key} · Modificateur à ajouter à 2d10</span><input type="number" min="0" max="99" step="1" name="characteristicModifier.${key}" value="${escapeHTML(value.characteristicModifiers?.[key] ?? '')}" placeholder="À configurer"></label>`
+    )).join('');
+    specificFields = `${speciesOnly ? '<p class="form-field-wide reference-card-meta">Le nom et la provenance de cette espèce restent protégés. Les dix modificateurs peuvent être ajustés pour correspondre à votre édition ou traduction.</p>' : `${textareaField('Autres noms reconnus pour cette espèce', 'aliases', value.aliases, { hint: 'Une variante par ligne, par exemple pour conserver une ancienne appellation.' })}`}<div class="form-grid form-field-wide species-modifier-grid">${modifierFields}</div><p class="form-hint form-field-wide">Chaque champ représente le modificateur d’espèce ajouté une seule fois à la somme des deux dés à dix faces. Laissez vide un modificateur non vérifié : la génération de cette espèce restera bloquée tant qu’il manque une valeur.</p>`;
   } else {
     specificFields = `${levelsOnly ? `<p class="reference-card-meta form-field-wide">${escapeHTML(value.name)} · ${escapeHTML(value.className || 'Classe non renseignée')} — les informations intégrées restent protégées ; seuls les niveaux personnels sont modifiables.</p>` : inputField('Classe', 'className', value.className, { placeholder: 'Ex. : Lettrés' })}${renderCareerLevelsEditor(value.levels || [])}${levelsOnly ? '' : `${textareaField('Compétences générales de carrière (facultatif)', 'skills', value.skills)}${textareaField('Identifiants généraux de compétences', 'skillIds', value.skillIds)}${textareaField('Talents généraux de carrière (facultatif)', 'talents', value.talents)}${textareaField('Identifiants généraux de talents', 'talentIds', value.talentIds)}${textareaField('Avancements généraux', 'advancements', value.advancements)}${textareaField('Conditions générales d’entrée', 'entryConditions', value.entryConditions)}${textareaField('Conditions générales de sortie', 'exitConditions', value.exitConditions)}${textareaField('Équipement général', 'equipment', value.equipment)}`}`;
   }
-  const headerFields = levelsOnly
+  const headerFields = levelsOnly || speciesOnly
     ? `<input type="hidden" name="name" value="${escapeHTML(value.name || '')}"><input type="hidden" name="description" value="${escapeHTML(value.description || '')}">`
     : `${inputField('Nom', 'name', value.name, { wide: true, placeholder: 'Nom de la référence' })}${textareaField('Description courte', 'description', value.description ? [value.description] : [], { hint: 'Résumé rédigé par vous, sans recopier les textes des ouvrages.' })}`;
   return `<dialog class="editor-dialog reference-editor-dialog" id="reference-editor-dialog" aria-labelledby="reference-editor-title"><div class="editor-shell">
-    <header class="editor-header"><div><div class="eyebrow"><span class="eyebrow-line"></span> RÉFÉRENTIEL ${levelsOnly ? 'INTÉGRÉ' : 'PERSONNALISÉ'}</div><h2 id="reference-editor-title">${levelsOnly ? 'Gérer les niveaux' : `${isEdit ? 'Modifier' : 'Ajouter'} : ${kind === 'religions' ? 'religion' : kind === 'deities' ? 'divinité' : 'carrière'}`}</h2><p>${levelsOnly ? 'Le nom et la classe de cette carrière intégrée sont protégés.' : 'Les données intégrées à l’application ne peuvent pas être modifiées.'}</p></div><button type="button" class="dialog-close" data-action="close-reference-editor" aria-label="Fermer">×</button></header>
+    <header class="editor-header"><div><div class="eyebrow"><span class="eyebrow-line"></span> RÉFÉRENTIEL ${levelsOnly || speciesOnly ? 'INTÉGRÉ' : 'PERSONNALISÉ'}</div><h2 id="reference-editor-title">${levelsOnly ? 'Gérer les niveaux' : speciesOnly ? 'Configurer : espèce' : `${isEdit ? 'Modifier' : 'Ajouter'} : ${kind === 'religions' ? 'religion' : kind === 'deities' ? 'divinité' : kind === 'species' ? 'espèce' : 'carrière'}`}</h2><p>${levelsOnly ? 'Le nom et la classe de cette carrière intégrée sont protégés.' : speciesOnly ? 'Ajustez les modificateurs appliqués aux jets de caractéristiques.' : 'Les données intégrées à l’application ne peuvent pas être modifiées.'}</p></div><button type="button" class="dialog-close" data-action="close-reference-editor" aria-label="Fermer">×</button></header>
     <form id="reference-form" class="character-form" data-reference-kind="${kind}" data-reference-id="${escapeHTML(value.id || '')}">
-      <section class="form-section"><div class="form-grid">${headerFields}${specificFields}${levelsOnly ? '' : textareaField('Références et sources', 'references', value.references, { hint: 'Indiquez les livres, pages ou sources que vous utilisez.' })}</div></section>
+      <section class="form-section"><div class="form-grid">${headerFields}${specificFields}${levelsOnly || speciesOnly ? '' : textareaField('Références et sources', 'references', value.references, { hint: 'Indiquez les livres, pages ou sources que vous utilisez.' })}</div></section>
       <footer class="editor-footer"><span class="autosave-state"><i></i> Stockage local</span><div><button type="button" class="button button-quiet" data-action="close-reference-editor">Annuler</button><button type="submit" class="button button-primary">Enregistrer <span aria-hidden="true">→</span></button></div></footer>
     </form>
   </div></dialog>`;

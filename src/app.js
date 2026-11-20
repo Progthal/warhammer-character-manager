@@ -13,6 +13,7 @@ import { renderDashboard, renderCharacterGrid } from './views/dashboard.js';
 import { renderCharacterDetail } from './views/character-detail.js';
 import { renderReferenceManager, renderReferenceEditor, renderCareerLevelsEditor, filterReferenceCards } from './views/reference-manager.js';
 import { escapeHTML } from './utils/format.js';
+import { generateCharacteristics } from './rules/characteristic-generator.js';
 
 const viewRoot = document.querySelector('#view-root');
 const modalRoot = document.querySelector('#modal-root');
@@ -150,6 +151,26 @@ function selectField(label, name, value, options) {
   return `<label class="form-field"><span>${label}</span><select name="${name}">${optionsHTML}</select></label>`;
 }
 
+function speciesSelectField(value) {
+  const allSpecies = referenceEntries
+    .filter((entry) => entry.kind === 'species')
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const speciesByName = new Map();
+  for (const entry of allSpecies) {
+    const normalizedName = entry.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr-FR');
+    const current = speciesByName.get(normalizedName);
+    if (!current || (current.source === 'builtin' && entry.source !== 'builtin')) speciesByName.set(normalizedName, entry);
+  }
+  const species = [...speciesByName.values()];
+  const options = ['<option value="">À définir</option>', ...species.map((entry) => (
+    `<option value="${escapeHTML(entry.name)}" ${value === entry.name ? 'selected' : ''}>${escapeHTML(entry.name)}${entry.source === 'pack' ? ' · pack importé' : entry.source === 'custom' ? ' · personnalisé' : entry.customized ? ' · ajusté' : ''}</option>`
+  ))];
+  if (value && !species.some((entry) => entry.name === value)) {
+    options.push(`<option value="${escapeHTML(value)}" selected>${escapeHTML(value)} · valeur existante</option>`);
+  }
+  return `<label class="form-field"><span>Espèce</span><select name="identity.species">${options.join('')}</select></label>`;
+}
+
 function careerLevelField(identity, selectedCareer) {
   const levels = getCareerLevels(selectedCareer);
   const current = identity.careerLevel || '';
@@ -187,6 +208,76 @@ function careerPreviewMarkup(career, selectedLevel = null) {
   return `<div class="career-preview-content">${career.description ? `<p>${escapeHTML(career.description)}</p>` : ''}${details ? `<div>${details}</div>` : '<small>Cette carrière ne contient pas encore de détails vérifiés. Vous pouvez les compléter depuis les Référentiels.</small>'}</div>`;
 }
 
+function characteristicGenerationPreviewMarkup(result) {
+  const rows = CHARACTERISTICS.map(({ key, label }) => {
+    const detail = result.details[key];
+    return `<tr><th scope="row"><span>${escapeHTML(key)}</span> ${escapeHTML(label)}</th><td>${detail.dice.join(' + ')} = ${detail.diceTotal}</td><td>+${detail.modifier}</td><td>${detail.minimum}–${detail.maximum}</td><td><strong>${detail.total}</strong></td></tr>`;
+  }).join('');
+  return `<div class="characteristic-preview-card">
+    <div class="characteristic-preview-heading"><div><strong>Aperçu de génération · ${escapeHTML(result.species)}</strong><small>Étape 1 : 2d10 + modificateur d’espèce, appliqué une seule fois.</small></div><span>NON ENREGISTRÉ</span></div>
+    <div class="characteristic-preview-table-wrap"><table class="characteristic-preview-table"><thead><tr><th>Caractéristique</th><th>Jet 2d10</th><th>Mod.</th><th>Plage</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="form-hint">Plage naturelle du jet : minimum 2 + modificateur, maximum 20 + modificateur. Les valeurs actuelles restent intactes tant que vous ne confirmez pas cet aperçu. Une nouvelle génération remplacera uniquement cet aperçu ; l’XP n’est pas modifiée.</p>
+    <div class="characteristic-preview-actions"><button type="button" class="button button-quiet" data-action="cancel-characteristics">Annuler</button><button type="button" class="button button-outline" data-action="reroll-characteristics">↻ Relancer</button><button type="button" class="button button-primary" data-action="confirm-characteristics">Confirmer les valeurs</button></div>
+  </div>`;
+}
+
+function clearCharacteristicGenerationPreview() {
+  if (editorState) editorState.characteristicPreview = null;
+  const preview = document.querySelector('#characteristic-generation-preview');
+  if (preview) {
+    preview.hidden = true;
+    preview.replaceChildren();
+  }
+}
+
+function generateCharacteristicPreview() {
+  const form = document.querySelector('#character-form');
+  const speciesField = form?.querySelector('[name="identity.species"]');
+  const species = speciesField?.value || '';
+  if (!species) {
+    showToast('Choisissez une espèce avant de générer les caractéristiques.', 'error');
+    speciesField?.focus();
+    return;
+  }
+
+  const hasExistingValues = CHARACTERISTICS.some(({ key }) => (
+    form.querySelector(`[name="characteristics.${key}"]`)?.value !== ''
+  ));
+  if (hasExistingValues && !editorState?.characteristicPreview && !window.confirm('Des caractéristiques sont déjà renseignées. Vous pourrez les remplacer en confirmant le nouvel aperçu. Continuer la génération ?')) return;
+
+  try {
+    const profiles = referenceEntries.filter((entry) => entry.kind === 'species');
+    const result = generateCharacteristics(species, profiles);
+    editorState.characteristicPreview = result;
+    const preview = document.querySelector('#characteristic-generation-preview');
+    preview.innerHTML = characteristicGenerationPreviewMarkup(result);
+    preview.hidden = false;
+  } catch (error) {
+    clearCharacteristicGenerationPreview();
+    showToast(error.message || 'Impossible de générer les caractéristiques.', 'error');
+  }
+}
+
+function confirmCharacteristicPreview() {
+  const result = editorState?.characteristicPreview;
+  const form = document.querySelector('#character-form');
+  if (!result || !form) return;
+  const selectedSpecies = form.querySelector('[name="identity.species"]')?.value || '';
+  if (selectedSpecies !== result.requestedSpecies) {
+    clearCharacteristicGenerationPreview();
+    showToast('L’espèce a changé. Relancez la génération avant de confirmer.', 'error');
+    return;
+  }
+
+  for (const { key } of CHARACTERISTICS) {
+    const input = form.querySelector(`[name="characteristics.${key}"]`);
+    if (input) input.value = String(result.characteristics[key]);
+  }
+  clearCharacteristicGenerationPreview();
+  scheduleEditorSave();
+  showToast('Les dix caractéristiques ont été appliquées. Elles restent modifiables.');
+}
+
 function renderEditor(character) {
   const { identity, characteristics, secondary, experience, profile } = character;
   const characteristicFields = CHARACTERISTICS.map(({ key, label }) => field(label, `characteristics.${key}`, characteristics[key], { type: 'number', min: 0, max: 999 })).join('');
@@ -201,7 +292,7 @@ function renderEditor(character) {
             <div class="form-grid">
               ${field('Prénom', 'identity.firstName', identity.firstName, { placeholder: 'Ex. : Alaric' })}
               ${field('Nom', 'identity.lastName', identity.lastName, { placeholder: 'Ex. : von Kessel' })}
-              ${selectField('Espèce', 'identity.species', identity.species, ['', 'Humain', 'Nain', 'Halfling', 'Elfe'])}
+              ${speciesSelectField(identity.species)}
               ${field('Genre', 'identity.gender', identity.gender, { placeholder: 'Facultatif' })}
               ${field('Âge', 'identity.age', identity.age, { type: 'number', min: 0, max: 999 })}
               ${field('Origine', 'identity.origin', identity.origin, { placeholder: 'Ville, province…' })}
@@ -225,7 +316,7 @@ function renderEditor(character) {
             </div>
           </section>
 
-          <section class="form-section"><div class="form-section-title"><span>03</span><div><h3>Caractéristiques principales</h3><p>Saisissez les valeurs de votre fiche de personnage.</p></div></div><div class="form-grid form-grid-stats">${characteristicFields}</div><p class="form-hint">Les valeurs restent modifiables. Aucun profil de départ ni calcul de règle n’est appliqué automatiquement.</p></section>
+          <section class="form-section"><div class="form-section-title"><span>03</span><div class="characteristic-section-heading"><div><h3>Caractéristiques principales</h3><p>Saisissez les valeurs de votre fiche de personnage.</p></div><button type="button" class="characteristic-generator-trigger" data-action="generate-characteristics" title="Générer les caractéristiques aléatoirement" aria-label="Générer les caractéristiques aléatoirement"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8" cy="8" r="1.25"/><circle cx="16" cy="8" r="1.25"/><circle cx="8" cy="12" r="1.25"/><circle cx="16" cy="12" r="1.25"/><circle cx="8" cy="16" r="1.25"/><circle cx="16" cy="16" r="1.25"/></svg></button></div></div><div class="form-grid form-grid-stats">${characteristicFields}</div><div id="characteristic-generation-preview" class="form-field-wide" hidden></div><p class="form-hint">Les valeurs restent modifiables. Le dé utilise les règles de génération configurées pour l’espèce sélectionnée.</p></section>
 
           <section class="form-section"><div class="form-section-title"><span>04</span><div><h3>Caractéristiques secondaires</h3><p>Ressources et valeurs complémentaires.</p></div></div>
             <div class="form-grid form-grid-stats">
@@ -366,8 +457,14 @@ async function openEditor(character) {
       return true;
     }
   });
-  form.addEventListener('input', scheduleEditorSave);
+  form.addEventListener('input', (event) => {
+    if (event.target.name === 'identity.species' || event.target.name?.startsWith('characteristics.')) {
+      clearCharacteristicGenerationPreview();
+    }
+    scheduleEditorSave();
+  });
   form.addEventListener('change', (event) => {
+    if (event.target.name === 'identity.species') clearCharacteristicGenerationPreview();
     if (event.target.id === 'career-level-select') {
       const careerId = form.querySelector('[data-reference-picker="careers"] [data-picker-id]')?.value || '';
       const career = referenceEntries.find((entry) => entry.kind === 'careers' && entry.id === careerId);
@@ -536,10 +633,11 @@ function openReferenceEditor(kind, id = '') {
   const existing = id ? referenceEntries.find((entry) => entry.id === id) : null;
   if (id && !existing) return showToast('Cette entrée de référentiel est introuvable.', 'error');
   const levelsOnly = existing?.source === 'builtin' && kind === 'careers';
-  if (existing?.source === 'builtin' && !levelsOnly) return showToast('Les données intégrées sont protégées.', 'error');
+  const speciesOnly = existing?.source === 'builtin' && kind === 'species';
+  if (existing?.source === 'builtin' && !levelsOnly && !speciesOnly) return showToast('Les données intégrées sont protégées.', 'error');
   const editorCareerId = kind === 'careers' ? existing?.id || `custom:career:${createId()}` : '';
   let careerLevels = kind === 'careers' ? getCareerLevels(existing) : [];
-  modalRoot.innerHTML = renderReferenceEditor(kind, existing, referenceEntries, { levelsOnly });
+  modalRoot.innerHTML = renderReferenceEditor(kind, existing, referenceEntries, { levelsOnly, speciesOnly });
   const dialog = document.querySelector('#reference-editor-dialog');
   const form = document.querySelector('#reference-form');
   const captureCareerLevels = () => [...form.querySelectorAll('.career-level-card')].map((card, index) => {
@@ -610,6 +708,22 @@ function openReferenceEditor(kind, id = '') {
       data.symbols = splitLines(values.get('symbols'));
       data.additionalInformation = values.get('additionalInformation');
       data.religionIds = values.getAll('religionIds');
+    } else if (kind === 'species') {
+      data.aliases = splitLines(values.get('aliases'));
+      data.characteristicModifiers = Object.fromEntries(CHARACTERISTICS.map(({ key }) => {
+        const raw = values.get(`characteristicModifier.${key}`);
+        return [key, raw === '' || raw === null ? null : Number(raw)];
+      }));
+      if (speciesOnly) {
+        data.id = existing.id;
+        data.source = existing.source;
+        data.packId = existing.packId;
+        data.customized = true;
+        data.name = existing.name;
+        data.description = existing.description;
+        data.aliases = existing.aliases || [];
+        data.references = existing.references || [];
+      }
     } else {
       careerLevels = captureCareerLevels();
       data.className = values.get('className');
@@ -646,7 +760,7 @@ function openReferenceEditor(kind, id = '') {
     }
   });
   dialog.showModal();
-  form.querySelector('[name="name"]')?.focus();
+  (form.querySelector('[name="name"]:not([type="hidden"])') || form.querySelector('input:not([type="hidden"])'))?.focus();
 }
 
 async function deleteReference(id) {
@@ -704,6 +818,10 @@ document.addEventListener('click', async (event) => {
   if (action === 'export-backup') exportBackup();
   if (action === 'import-json') importInput.click();
   if (action === 'close-editor') await closeEditor();
+  if (action === 'generate-characteristics') generateCharacteristicPreview();
+  if (action === 'reroll-characteristics') generateCharacteristicPreview();
+  if (action === 'cancel-characteristics') clearCharacteristicGenerationPreview();
+  if (action === 'confirm-characteristics') confirmCharacteristicPreview();
   if (action === 'add-reference') openReferenceEditor(button.dataset.kind);
   if (action === 'edit-reference') {
     const entry = referenceEntries.find((item) => item.id === id);

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'wcm-shell-';
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
@@ -13,6 +13,7 @@ const APP_SHELL = [
   './src/components/reference-picker.js',
   './src/router.js',
   './src/models/character.js',
+  './src/rules/characteristic-generator.js',
   './src/database/migrations.js',
   './src/database/indexeddb.js',
   './src/services/import-export.js',
@@ -23,7 +24,8 @@ const APP_SHELL = [
   './src/views/reference-manager.js',
   './data/religions.json',
   './data/deities.json',
-  './data/careers.json'
+  './data/careers.json',
+  './data/species.json'
 ];
 
 self.addEventListener('install', (event) => {

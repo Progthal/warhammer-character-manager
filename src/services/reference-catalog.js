@@ -6,12 +6,13 @@ import {
 } from '../database/indexeddb.js';
 import { createId } from '../models/character.js';
 
-export const REFERENCE_KINDS = Object.freeze(['religions', 'deities', 'careers']);
+export const REFERENCE_KINDS = Object.freeze(['religions', 'deities', 'careers', 'species']);
 export const REFERENCE_APP = 'warhammer-character-manager';
 export const REFERENCE_FORMAT_VERSION = 1;
 export const MAX_REFERENCE_IMPORT_SIZE = 10 * 1024 * 1024;
 
-const KIND_SINGULAR = { religions: 'religion', deities: 'deity', careers: 'career' };
+const KIND_SINGULAR = { religions: 'religion', deities: 'deity', careers: 'career', species: 'species' };
+const CHARACTERISTIC_KEYS = ['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'];
 const TEXT_LIMIT = 5000;
 const now = () => new Date().toISOString();
 const CAREER_LEVEL_LIST_FIELDS = [
@@ -111,6 +112,21 @@ export function normalizeReference(kind, input, options = {}) {
       additionalInformation: cleanText(input?.additionalInformation, TEXT_LIMIT)
     };
   }
+  if (kind === 'species') {
+    const modifiers = input?.characteristicModifiers && typeof input.characteristicModifiers === 'object'
+      ? input.characteristicModifiers
+      : {};
+    return {
+      ...common,
+      aliases: cleanList(input?.aliases),
+      customized: source === 'builtin' && Boolean(input?.customized),
+      characteristicModifiers: Object.fromEntries(CHARACTERISTIC_KEYS.map((key) => {
+        const value = modifiers[key];
+        const number = value === '' || value === null || value === undefined ? null : Number(value);
+        return [key, Number.isInteger(number) && number >= 0 && number <= 99 ? number : null];
+      }))
+    };
+  }
   return {
     ...common,
     className: cleanText(input?.className, 120),
@@ -160,13 +176,27 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
       ? ['deityIds', 'particularities']
       : entry.kind === 'deities'
         ? ['religionIds', 'domains', 'symbols']
-        : ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
+        : entry.kind === 'species'
+          ? ['aliases']
+          : ['skills', 'skillIds', 'talents', 'talentIds', 'advancements', 'entryConditions', 'exitConditions', 'equipment'];
     for (const field of listFields) {
       if (entry[field] !== undefined && (!Array.isArray(entry[field]) || entry[field].some((value) => typeof value !== 'string'))) {
         errors.push(`${location} : champ « ${field} » invalide.`);
       }
     }
     if (entry.description !== undefined && typeof entry.description !== 'string') errors.push(`${location} : description invalide.`);
+    if (entry.kind === 'species' && entry.characteristicModifiers !== undefined) {
+      if (!entry.characteristicModifiers || typeof entry.characteristicModifiers !== 'object' || Array.isArray(entry.characteristicModifiers)) {
+        errors.push(`${location} : modificateurs de caractéristiques invalides.`);
+      } else {
+        for (const key of CHARACTERISTIC_KEYS) {
+          const value = entry.characteristicModifiers[key];
+          if (value !== undefined && value !== null && (!Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > 99)) {
+            errors.push(`${location} : modificateur invalide pour « ${key} » (entier de 0 à 99 attendu).`);
+          }
+        }
+      }
+    }
     if (entry.kind === 'careers' && entry.levels !== undefined) {
       if (!Array.isArray(entry.levels) || entry.levels.length > 100) {
         errors.push(`${location} : la liste des niveaux est invalide (100 maximum).`);
@@ -350,12 +380,15 @@ export function buildReferenceDeleteBundle(entries, id) {
 }
 
 export function exportCustomReferencePack(entries, exportedAt = now()) {
-  const exportable = entries.filter((entry) => entry.source !== 'builtin').map((entry) => {
+  const exportable = entries.filter((entry) => (
+    entry.source !== 'builtin' || (entry.kind === 'species' && entry.customized)
+  )).map((entry) => {
     const copy = { ...entry };
     delete copy.source;
     delete copy.packId;
     delete copy.createdAt;
     delete copy.updatedAt;
+    delete copy.customized;
     return copy;
   });
   return {
