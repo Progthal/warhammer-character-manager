@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#171816">
+    <meta name="description" content="Un espace personnel pour créer et gérer vos personnages Warhammer Fantasy Roleplay 4e.">
+    <title>Warhammer Character Manager</title>
+    <link rel="icon" href="./assets/icons/app-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="stylesheet" href="./assets/css/app.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navigation principale">
+        <a class="brand" href="#/" aria-label="Warhammer Character Manager, accueil">
+          <span class="brand-mark" aria-hidden="true">W</span>
+          <span class="brand-copy">
+            <strong>Warhammer</strong>
+            <small>Character Manager</small>
+          </span>
+        </a>
+
+        <div class="sidebar-label">Espace personnel</div>
+        <nav class="primary-nav">
+          <a class="nav-link is-active" href="#/" data-nav="dashboard">
+            <span class="nav-icon" aria-hidden="true">⌂</span>
+            <span>Tableau de bord</span>
+          </a>
+          <a class="nav-link" href="#/" data-nav="characters">
+            <span class="nav-icon" aria-hidden="true">♙</span>
+            <span>Personnages</span>
+            <span class="nav-count" id="sidebar-character-count">0</span>
+          </a>
+          <a class="nav-link" href="#/references" data-nav="references">
+            <span class="nav-icon" aria-hidden="true">♧</span>
+            <span>Référentiels</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-storage">
+          <span class="storage-icon" aria-hidden="true">▣</span>
+          <div>
+            <strong>Stockage local</strong>
+            <small>Vos données restent ici</small>
+          </div>
+          <span class="storage-dot" aria-label="Stockage local actif"></span>
+        </div>
+        <div class="sidebar-footer">WFRP 4e <span>•</span> Édition personnelle</div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="breadcrumb"><span>LE VIEUX MONDE</span><span class="breadcrumb-separator">/</span><strong id="breadcrumb-current">TABLEAU DE BORD</strong></div>
+          <div class="topbar-actions">
+            <span class="connection-status" id="connection-status"><span class="status-dot"></span><span>En ligne</span></span>
+            <button class="button button-quiet button-icon-label" type="button" data-action="export-backup" title="Exporter tous les personnages">
+              <span aria-hidden="true">⇩</span><span>Exporter</span>
+            </button>
+            <button class="button button-primary" type="button" data-action="new-character"><span class="button-plus" aria-hidden="true">＋</span> Nouveau personnage</button>
+          </div>
+        </header>
+
+        <main id="view-root" class="view-root" tabindex="-1" aria-live="polite">
+          <div class="loading-state"><span class="loader"></span><p>Ouverture du grimoire…</p></div>
+        </main>
+
+        <footer class="page-footer">
+          <span>Warhammer Character Manager <span class="footer-separator">•</span> Données conservées sur cet appareil</span>
+          <span id="save-indicator">Initialisation du stockage…</span>
+        </footer>
+      </div>
+    </div>
+
+    <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json">
+    <input id="reference-import-file" class="visually-hidden" type="file" accept="application/json,.json">
+    <div id="modal-root"></div>
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

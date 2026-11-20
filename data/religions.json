@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "religions",
+  "version": 1,
+  "sourceNote": "Référentiel synthétique rédigé pour l’application ; référence de vérification : Warhammer Fantasy Roleplay, 4e édition, chapitre « Religion et croyances ».",
+  "entries": [
+    { "id": "builtin:religion:manann", "name": "Culte de Manann", "description": "Tradition religieuse consacrée à Manann, associée aux mers et aux marins.", "deityIds": ["builtin:deity:manann"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:morr", "name": "Culte de Morr", "description": "Tradition religieuse consacrée à Morr, associée à la mort et aux rêves.", "deityIds": ["builtin:deity:morr"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:myrmidia", "name": "Culte de Myrmidia", "description": "Tradition religieuse consacrée à Myrmidia, associée à la stratégie et à l'art de la guerre.", "deityIds": ["builtin:deity:myrmidia"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:ranald", "name": "Culte de Ranald", "description": "Tradition religieuse consacrée à Ranald, associée à la ruse et à la chance.", "deityIds": ["builtin:deity:ranald"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:rhya", "name": "Culte de Rhya", "description": "Tradition religieuse consacrée à Rhya, associée à la fertilité et à la terre.", "deityIds": ["builtin:deity:rhya"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:shallya", "name": "Culte de Shallya", "description": "Tradition religieuse consacrée à Shallya, associée à la guérison et à la miséricorde.", "deityIds": ["builtin:deity:shallya"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:sigmar", "name": "Culte de Sigmar", "description": "Tradition religieuse consacrée à Sigmar, dieu tutélaire de l'Empire.", "deityIds": ["builtin:deity:sigmar"], "particularities": [], "origin": "Empire", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:taal", "name": "Culte de Taal", "description": "Tradition religieuse consacrée à Taal, associée à la nature et aux espaces sauvages.", "deityIds": ["builtin:deity:taal"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:ulric", "name": "Culte d'Ulric", "description": "Tradition religieuse consacrée à Ulric, associée à la guerre, aux loups et à l'hiver.", "deityIds": ["builtin:deity:ulric"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:religion:verena", "name": "Culte de Verena", "description": "Tradition religieuse consacrée à Verena, associée au savoir et à la justice.", "deityIds": ["builtin:deity:verena"], "particularities": [], "origin": "Vieux Monde", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] }
+  ]
+}

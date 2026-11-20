@@ -1,0 +1,27 @@
+{
+  "id": "./",
+  "name": "Warhammer Character Manager",
+  "short_name": "WFRP Manager",
+  "description": "Gestion personnelle de personnages Warhammer Fantasy Roleplay 4e.",
+  "lang": "fr-FR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111210",
+  "theme_color": "#171816",
+  "icons": [
+    {
+      "src": "./assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

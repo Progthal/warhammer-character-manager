@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "deities",
+  "version": 1,
+  "sourceNote": "Domaines résumés avec des formulations originales ; référence de vérification : Warhammer Fantasy Roleplay, 4e édition, chapitre « Religion et croyances ».",
+  "entries": [
+    { "id": "builtin:deity:manann", "name": "Manann", "religionIds": ["builtin:religion:manann"], "domains": ["Mers", "Marées", "Océans"], "symbols": [], "description": "Divinité associée aux mers, aux marées et aux océans.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:morr", "name": "Morr", "religionIds": ["builtin:religion:morr"], "domains": ["Mort", "Rêves"], "symbols": [], "description": "Divinité associée à la mort et aux rêves.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:myrmidia", "name": "Myrmidia", "religionIds": ["builtin:religion:myrmidia"], "domains": ["Stratégie", "Art de la guerre"], "symbols": [], "description": "Divinité associée à la stratégie et à l'art de la guerre.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:ranald", "name": "Ranald", "religionIds": ["builtin:religion:ranald"], "domains": ["Ruse", "Chance", "Filouterie"], "symbols": [], "description": "Divinité associée à la ruse et à la chance.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:rhya", "name": "Rhya", "religionIds": ["builtin:religion:rhya"], "domains": ["Fertilité", "Terre"], "symbols": [], "description": "Divinité associée à la fertilité et à la terre.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:shallya", "name": "Shallya", "religionIds": ["builtin:religion:shallya"], "domains": ["Guérison", "Miséricorde", "Accouchement"], "symbols": [], "description": "Divinité associée à la guérison, à la miséricorde et à la maternité.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:sigmar", "name": "Sigmar", "religionIds": ["builtin:religion:sigmar"], "domains": ["Empire", "Protection"], "symbols": [], "description": "Divinité tutélaire de l'Empire, associée à sa protection.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:taal", "name": "Taal", "religionIds": ["builtin:religion:taal"], "domains": ["Nature", "Espaces sauvages"], "symbols": [], "description": "Divinité associée à la nature et aux espaces sauvages.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:ulric", "name": "Ulric", "religionIds": ["builtin:religion:ulric"], "domains": ["Combat", "Loups", "Hiver"], "symbols": [], "description": "Divinité associée au combat, aux loups et à l'hiver.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] },
+    { "id": "builtin:deity:verena", "name": "Verena", "religionIds": ["builtin:religion:verena"], "domains": ["Savoir", "Justice"], "symbols": [], "description": "Divinité associée au savoir et à la justice.", "additionalInformation": "", "references": ["Warhammer Fantasy Roleplay, 4e édition, chapitre Religion et croyances."] }
+  ]
+}
