@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'warhammer-character-manager';
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 7;
 
 export function migrateCareerReferenceRecord(record) {
   if (!record || record.kind !== 'careers' || !Array.isArray(record.levels)) return record;
@@ -47,10 +47,11 @@ export function migrateCharacterRecord(record) {
     : {};
   return {
     ...record,
-    schemaVersion: 4,
+    schemaVersion: 6,
     identity: {
       ...identity,
       careerLevelId: typeof identity.careerLevelId === 'string' ? identity.careerLevelId : '',
+      careerCompleted: identity.careerCompleted === true,
       speciesId: typeof identity.speciesId === 'string' ? identity.speciesId : ''
     },
     characteristics: Object.fromEntries(['CC', 'CT', 'F', 'E', 'I', 'Ag', 'Dex', 'Int', 'FM', 'Soc'].map((key) => [
@@ -144,6 +145,14 @@ export function upgradeDatabase(database, transaction, oldVersion) {
   }
 
   if (oldVersion >= 4 && oldVersion < 5 && database.objectStoreNames.contains('characters')) {
+    migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
+  }
+
+  if (oldVersion >= 5 && oldVersion < 6 && database.objectStoreNames.contains('characters')) {
+    migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
+  }
+
+  if (oldVersion >= 6 && oldVersion < 7 && database.objectStoreNames.contains('characters')) {
     migrateStoreRecords(transaction.objectStore('characters'), migrateCharacterRecord);
   }
 }

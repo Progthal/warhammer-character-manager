@@ -1,8 +1,8 @@
 {
   "kind": "talents",
   "schemaVersion": 1,
-  "version": 1,
-  "sourceNote": "Index communautaire WFRP4e Wikidot, consulté le 20 novembre 2026. Il s’agit d’un index de noms, pas d’une validation officielle exhaustive : aucun nom français, description, catégorie, test, rang maximal, prérequis, restriction ou effet mécanique n’est déduit. Toutes les entrées ont le statut communautaire ; consulter les ouvrages Cubicle 7 utilisés à la table avant toute validation de règle.",
+  "version": 2,
+  "sourceNote": "Index communautaire de départ : 162 noms provenant de l’index WFRP4e Wikidot, complétés par 18 talents supplémentaires signalés avec leurs localisations dans WFRP 4E Comprehensive Resource Guide (compilation communautaire). Total 180 entrées, dont aucun bloc de règles officiel n’est reproduit. Tous les noms restent classés communautaires et non vérifiés indépendamment. Les descriptions, noms français, catégories, tests, rangs maximum, prérequis, restrictions, compatibilités espèce/carrière et effets non confirmés sont laissés vides. Les références de suppléments sont des pistes de vérification, pas des validations officielles.",
   "entries": [
     {
       "id": "builtin:talent:accurate-shot",
@@ -157,6 +157,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:animal-assistant",
+      "name": "Animal Assistant",
+      "name_fr": "",
+      "name_original": "Animal Assistant",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Archives of the Empire: Volume III, p. 81"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Archives of the Empire: Volume III, p. 81",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -421,6 +451,36 @@
       "custom": false
     },
     {
+      "id": "builtin:talent:blessed-by-isha",
+      "name": "Blessed by Isha",
+      "name_fr": "",
+      "name_original": "Blessed by Isha",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Lustria, p. 127"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Lustria, p. 127",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
       "id": "builtin:talent:bookish",
       "name": "Bookish",
       "name_fr": "",
@@ -495,6 +555,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:cantor",
+      "name": "Cantor",
+      "name_fr": "",
+      "name_original": "Cantor",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Ubersreik Adventures I, p. 76"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Ubersreik Adventures I, p. 76",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -625,6 +715,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:chanty",
+      "name": "Chanty",
+      "name_fr": "",
+      "name_original": "Chanty",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Sea of Claws, p. 63"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Sea of Claws, p. 63",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -785,6 +905,36 @@
       "custom": false
     },
     {
+      "id": "builtin:talent:controlled-corruption",
+      "name": "Controlled Corruption",
+      "name_fr": "",
+      "name_original": "Controlled Corruption",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Power Behind the Throne Companion, p. 34"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Power Behind the Throne Companion, p. 34",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
       "id": "builtin:talent:coolheaded",
       "name": "Coolheaded",
       "name_fr": "",
@@ -859,6 +1009,37 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:crew-commander",
+      "name": "Crew Commander",
+      "name_fr": "",
+      "name_original": "Crew Commander",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Up in Arms, p. 140",
+        "Sea of Claws, p. 63"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Up in Arms, p. 140, Sea of Claws, p. 63",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -1019,6 +1200,36 @@
       "custom": false
     },
     {
+      "id": "builtin:talent:disciple-of-change",
+      "name": "Disciple of Change",
+      "name_fr": "",
+      "name_original": "Disciple of Change",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Enemy in Shadows Companion, p. 75"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Enemy in Shadows Companion, p. 75",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
       "id": "builtin:talent:distract",
       "name": "Distract",
       "name_fr": "",
@@ -1067,6 +1278,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:double-life",
+      "name": "Double Life",
+      "name_fr": "",
+      "name_original": "Double Life",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Enemy in Shadows Companion, p. 75"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Enemy in Shadows Companion, p. 75",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -1197,6 +1438,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:extra-spell",
+      "name": "Extra Spell",
+      "name_fr": "",
+      "name_original": "Extra Spell",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Power Behind the Throne Companion, p. 34"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Power Behind the Throne Companion, p. 34",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -1387,7 +1658,9 @@
       "name": "Flee",
       "name_fr": "",
       "name_original": "Flee",
-      "aliases": [],
+      "aliases": [
+        "Flee!"
+      ],
       "description": "",
       "category": "",
       "tests": [],
@@ -1613,6 +1886,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:high-magic",
+      "name": "High Magic",
+      "name_fr": "",
+      "name_original": "High Magic",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Lustria, p. 127"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Lustria, p. 127",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -2059,6 +2362,36 @@
       "custom": false
     },
     {
+      "id": "builtin:talent:magical-assistant",
+      "name": "Magical Assistant",
+      "name_fr": "",
+      "name_original": "Magical Assistant",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Winds of Magic, p. 186"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Winds of Magic, p. 186",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
       "id": "builtin:talent:magnum-opus",
       "name": "Magnum Opus",
       "name_fr": "",
@@ -2107,6 +2440,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:master-and-commander",
+      "name": "Master and Commander",
+      "name_fr": "",
+      "name_original": "Master and Commander",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Sea of Claws, p. 63"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Sea of Claws, p. 63",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -3723,6 +4086,96 @@
       "custom": false
     },
     {
+      "id": "builtin:talent:suffuse-with-wind",
+      "name": "Suffuse with [Wind]",
+      "name_fr": "",
+      "name_original": "Suffuse with [Wind]",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Winds of Magic, p. 186"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Winds of Magic, p. 186",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:suffuse-with-magic",
+      "name": "Suffuse with Magic",
+      "name_fr": "",
+      "name_original": "Suffuse with Magic",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Enemy in Shadows Companion, p. 79"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Enemy in Shadows Companion, p. 79",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:suffuse-with-ulgu",
+      "name": "Suffuse with Ulgu",
+      "name_fr": "",
+      "name_original": "Suffuse with Ulgu",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Rough Nights & Hard Days, p. 88"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Rough Nights & Hard Days, p. 88",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
+      },
+      "custom": false
+    },
+    {
       "id": "builtin:talent:super-numerate",
       "name": "Super Numerate",
       "name_fr": "",
@@ -3823,6 +4276,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:tail-fighting",
+      "name": "Tail Fighting",
+      "name_fr": "",
+      "name_original": "Tail Fighting",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "The Horned Rat Companion, p. 34"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "The Horned Rat Companion, p. 34",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -3979,6 +4462,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:tzeentch-s-blessing",
+      "name": "Tzeentch's Blessing",
+      "name_fr": "",
+      "name_original": "Tzeentch's Blessing",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Enemy in Shadows Companion, p. 75"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Enemy in Shadows Companion, p. 75",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     },
@@ -4213,6 +4726,36 @@
         "page": "",
         "url": "https://wfrp4e.wikidot.com/talents",
         "note": "Nom repéré dans un index communautaire. Le supplément, la page, la traduction et les paramètres de règle de cette entrée ne sont pas vérifiés indépendamment."
+      },
+      "custom": false
+    },
+    {
+      "id": "builtin:talent:wilful-corruption",
+      "name": "Wilful Corruption",
+      "name_fr": "",
+      "name_original": "Wilful Corruption",
+      "aliases": [],
+      "description": "",
+      "category": "",
+      "tests": [],
+      "skills": [],
+      "max_rank": null,
+      "effects": [],
+      "prerequisites": [],
+      "species": [],
+      "career_ids": [],
+      "career_level_ids": [],
+      "availability": "unknown",
+      "verification_status": "community",
+      "references": [
+        "Death on the Reik Companion, p. 100"
+      ],
+      "source_info": {
+        "title": "WFRP 4E Comprehensive Resource Guide",
+        "publisher": "Compilation communautaire (index de suppléments)",
+        "page": "Death on the Reik Companion, p. 100",
+        "url": "https://www.scribd.com/document/681373562/WFRP-4e-index",
+        "note": "Nom et localisation dans un ouvrage relevés dans une compilation communautaire. Les règles, la traduction, la catégorie, les conditions et les paramètres mécaniques ne sont pas validés indépendamment. Vérifier l’ouvrage Cubicle 7 correspondant."
       },
       "custom": false
     }

@@ -27,6 +27,27 @@ test('les caractéristiques séparent valeur initiale, talents vérifiés, augme
   assert.equal(result.CT.bonus, null);
 });
 
+test('un talent sélectionné ou suggéré ne produit aucun bonus avant son acquisition', () => {
+  const character = createCharacter({
+    characteristics: { F: 30 },
+    talents: [
+      {
+        id: 'selected-talent', name: 'Talent sélectionné', rank: 1,
+        acquired: false, status: 'selected',
+        effects: [{ type: 'characteristicBonus', characteristic: 'F', value: 5, verified: true, reference: 'Livre, p. 20' }]
+      },
+      {
+        id: 'suggested-talent', name: 'Talent suggéré', rank: 1,
+        acquired: true, status: 'suggested',
+        effects: [{ type: 'characteristicBonus', characteristic: 'F', value: 3, verified: true, reference: 'Livre, p. 21' }]
+      }
+    ]
+  });
+  const result = calculateCharacteristics(character).F;
+  assert.equal(result.talentBonus, 0);
+  assert.equal(result.current, 30);
+});
+
 test('le modificateur d’espèce est additionné séparément du jet et des autres bonus', () => {
   const character = createCharacter({
     characteristics: { CC: 32 },

@@ -65,7 +65,7 @@ export function renderReferenceManager(entries) {
       <div class="talent-filter-grid">
         <label class="form-field form-field-wide"><span>Nom, alias, description ou référence</span><input type="search" data-talent-filter="query" placeholder="Nom français ou original…" autocomplete="off"></label>
         <label class="form-field"><span>Catégorie</span><select data-talent-filter="category"><option value="">Toutes</option>${categories.map((value) => `<option value="${escapeHTML(value)}">${escapeHTML(value)}</option>`).join('')}<option value="__none">Non renseignée</option></select></label>
-        <label class="form-field"><span>Espèce</span><select data-talent-filter="speciesId"><option value="">Toutes les espèces</option>${species.map((entry) => `<option value="${escapeHTML(entry.id)}">${escapeHTML(entry.name)}</option>`).join('')}</select></label>
+        <label class="form-field"><span>Espèce</span><select data-talent-filter="speciesId"><option value="">Toutes les associations</option>${species.map((entry) => `<option value="${escapeHTML(entry.id)}">${escapeHTML(entry.name)} (association documentée)</option>`).join('')}<option value="__none">Aucune association documentée</option></select></label>
         <label class="form-field"><span>Carrière associée</span><select data-talent-filter="careerId"><option value="">Toutes les carrières</option>${careers.map((entry) => `<option value="${escapeHTML(entry.id)}">${escapeHTML(entry.name)}</option>`).join('')}</select></label>
         <label class="form-field"><span>Classe de carrière</span><select data-talent-filter="careerClass"><option value="">Toutes les classes</option>${careerClasses.map((value) => `<option value="${escapeHTML(value)}">${escapeHTML(value)}</option>`).join('')}</select></label>
         <label class="form-field"><span>Niveau de carrière</span><select data-talent-filter="careerLevelId"><option value="">Tous les niveaux</option>${careerLevels.map((level) => `<option value="${escapeHTML(level.id)}">${escapeHTML(level.name)}</option>`).join('')}</select></label>
@@ -89,7 +89,7 @@ export function renderTalentCards(entries) {
     const label = entry.name_fr || entry.name;
     const sourceStatus = entry.verificationStatus === 'verified' ? 'Confirmé par source' : entry.verificationStatus === 'incomplete' ? 'Informations incomplètes' : entry.verificationStatus === 'community' ? 'Communautaire' : 'Personnalisé';
     const rank = entry.maxRank ? `Maximum ${entry.maxRank} rang(s)` : 'Maximum non renseigné';
-    const detail = [entry.category || 'Catégorie non renseignée', entry.tests?.length ? `Tests : ${entry.tests.join(', ')}` : '', entry.skills?.length ? `Compétences : ${entry.skills.join(', ')}` : '', rank, `Disponibilité : ${entry.availability === 'unknown' ? 'non renseignée' : entry.availability}`].filter(Boolean).join(' · ');
+    const detail = [entry.category || 'Catégorie non renseignée', entry.tests?.length ? `Tests : ${entry.tests.join(', ')}` : '', entry.skills?.length ? `Compétences : ${entry.skills.join(', ')}` : '', rank, entry.advancementCostVerified ? `Coût : ${entry.advancementCost} XP / rang` : 'Coût XP non vérifié', `Disponibilité : ${entry.availability === 'unknown' ? 'non renseignée' : entry.availability}`].filter(Boolean).join(' · ');
     const sourceText = [entry.sourceInfo?.title, entry.sourceInfo?.publisher, entry.sourceInfo?.page ? `p. ${entry.sourceInfo.page}` : '', entry.sourceInfo?.url].filter(Boolean).join(' · ') || (entry.references || []).join(' · ');
     return `<article class="reference-card talent-reference-card">
       <div class="reference-card-top"><span class="reference-kind">TALENT</span><span class="source-badge ${entry.source === 'builtin' ? 'source-builtin' : entry.source === 'pack' ? 'source-pack' : 'source-custom'}">${entry.source === 'builtin' ? 'Intégré' : entry.source === 'pack' ? 'Pack importé' : 'Personnalisé'}</span></div>
@@ -128,8 +128,10 @@ export function renderTalentEditor(entry, allEntries) {
         ${textarea('Caractéristiques ou tests associés', 'tests', value.tests)}
         ${textarea('Compétences associées', 'skills', value.skills)}
         <label class="form-field"><span>Rang maximal connu</span><input type="number" min="1" max="999" name="maxRank" value="${escapeHTML(value.maxRank ?? '')}" placeholder="Non renseigné"></label>
+        <label class="form-field"><span>Coût XP par acquisition / rang</span><input type="number" min="1" max="9999" name="advancementCost" value="${escapeHTML(value.advancementCost ?? '')}" placeholder="Non renseigné"></label>
+        <label class="form-field inline-check"><input type="checkbox" name="advancementCostVerified" value="1" ${value.advancementCostVerified ? 'checked' : ''}><span>Coût vérifié dans la source indiquée ci-dessous</span></label>
         ${textarea('Prérequis / conditions', 'prerequisites', value.prerequisites)}
-        ${multi('Espèces concernées (laisser vide si non restreint ou inconnu)', 'species', species, value.species)}
+        ${multi('Espèces explicitement associées (laisser vide si aucune association précise n’est vérifiée)', 'species', species, value.species)}
         ${multi('Carrières associées', 'careerIds', careers, value.careerIds)}
         ${textarea('Identifiants de niveaux de carrière associés', 'careerLevelIds', value.careerLevelIds, 'Un identifiant de niveau par ligne ; laissez vide si non vérifié.')}
         <label class="form-field"><span>Disponibilité</span><select name="availability"><option value="unknown" ${selectedAvailability === 'unknown' ? 'selected' : ''}>Non renseignée</option><option value="available" ${selectedAvailability === 'available' ? 'selected' : ''}>Disponible</option><option value="restricted" ${selectedAvailability === 'restricted' ? 'selected' : ''}>Restreinte</option><option value="unavailable" ${selectedAvailability === 'unavailable' ? 'selected' : ''}>Indisponible</option></select></label>
@@ -137,6 +139,7 @@ export function renderTalentEditor(entry, allEntries) {
         ${input('Ouvrage / document source', 'sourceTitle', value.sourceInfo?.title, true)}
         ${input('Éditeur / auteur', 'sourcePublisher', value.sourceInfo?.publisher)}${input('Page / section', 'sourcePage', value.sourceInfo?.page)}
         ${input('URL de référence', 'sourceUrl', value.sourceInfo?.url, true)}
+        ${textarea('Références précises (ouvrages, chapitres, pages)', 'references', value.references, 'Une référence courte par ligne. Ne recopiez pas les descriptions des ouvrages.')}
         ${textarea('Note de vérification', 'sourceNote', value.sourceInfo?.note, 'Précisez ce qui est vérifié et ce qui reste à confirmer.')}
         ${textarea('Effets mécaniques (JSON)', 'effects', value.effects?.length ? JSON.stringify(value.effects, null, 2) : '', 'Laissez vide si aucun effet. Exemple : [{"type":"characteristicBonus","characteristic":"F","value":5,"verified":true,"reference":"Livre de base, p. 123"}]. Les autres types restent documentaires tant qu’un calcul vérifié n’est pas implémenté.')}
       </div></section>

@@ -139,8 +139,8 @@ test('les niveaux non documentés, ressources manuelles et incohérences sont si
   assert.equal(result.valid, true);
   assert.ok(result.warnings.some(({ message }) => message.includes('aucun niveau')));
   assert.ok(result.warnings.some(({ message }) => message.includes('blessures actuelles')));
-  assert.ok(result.warnings.some(({ message }) => message.includes('rangs répétés')));
-  assert.ok(result.warnings.some(({ message }) => message.includes('rang(s) 1, 2 absent(s)')));
+  assert.equal(character.talents.filter(({ name }) => name === 'Concentration').length, 1);
+  assert.ok(!result.warnings.some(({ message }) => message.includes('Talents en double')));
   assert.ok(result.information.some(({ message }) => message.includes('restent à renseigner')));
 });
 

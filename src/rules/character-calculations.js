@@ -8,6 +8,23 @@ function finiteOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Calcule les bonus de talents en appliquant les mêmes conditions partout. */
+export function calculateTalentCharacteristicBonuses(talents = []) {
+  const bonuses = Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, 0]));
+  for (const talent of Array.isArray(talents) ? talents : []) {
+    if (talent?.acquired === false || talent?.status === 'selected' || talent?.status === 'suggested') continue;
+    for (const effect of Array.isArray(talent?.effects) ? talent.effects : []) {
+      if (effect?.type !== 'characteristicBonus'
+        || !CHARACTERISTIC_KEYS.has(effect.characteristic)
+        || effect.verified !== true
+        || !String(effect.reference || '').trim()) continue;
+      const value = finiteOrNull(effect.value);
+      if (value !== null) bonuses[effect.characteristic] += value;
+    }
+  }
+  return bonuses;
+}
+
 /**
  * Calcule les valeurs dérivées sans supposer de règle absente des données.
  * Un effet de talent n'est appliqué que s'il est structuré et explicitement
@@ -15,19 +32,13 @@ function finiteOrNull(value) {
  */
 export function calculateCharacteristics(character) {
   const result = {};
-  const talents = Array.isArray(character?.talents) ? character.talents : [];
+  const talentBonuses = calculateTalentCharacteristicBonuses(character?.talents);
 
   for (const { key, label, shortLabel } of CHARACTERISTICS) {
     const initial = finiteOrNull(character?.characteristics?.[key]);
     const speciesBonus = finiteOrNull(character?.characteristicSpeciesModifiers?.[key]);
     const advances = Math.max(0, finiteOrNull(character?.characteristicAdvances?.[key]) ?? 0);
-    const talentBonus = talents.reduce((total, talent) => {
-      const effects = Array.isArray(talent?.effects) ? talent.effects : [];
-      return total + effects.reduce((sum, effect) => {
-        if (effect?.type !== 'characteristicBonus' || effect?.characteristic !== key || effect?.verified !== true || !String(effect.reference || '').trim()) return sum;
-        return sum + (finiteOrNull(effect.value) ?? 0);
-      }, 0);
-    }, 0);
+    const talentBonus = talentBonuses[key];
     const current = initial === null || speciesBonus === null ? null : initial + speciesBonus + advances + talentBonus;
     result[key] = {
       key,

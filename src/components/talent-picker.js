@@ -24,6 +24,7 @@ function talentSummary(entry) {
     entry.prerequisites?.length ? `Prérequis : ${entry.prerequisites.join(' ; ')}` : '',
     entry.sourceInfo?.title ? `Source : ${entry.sourceInfo.title}${entry.sourceInfo.publisher ? ` · ${entry.sourceInfo.publisher}` : ''}${entry.sourceInfo.page ? `, p. ${entry.sourceInfo.page}` : ''}` : '',
     entry.sourceInfo?.note || '',
+    entry.references?.length ? `Références : ${entry.references.join(' · ')}` : '',
     sourceLabel(entry)
   ].filter(Boolean);
   return details.join(' · ');
@@ -32,18 +33,31 @@ function talentSummary(entry) {
 export function renderTalentPicker(talent = {}, catalog = []) {
   const selected = findTalentReference(catalog, talent.referenceId, talent.name);
   const referenceId = selected?.id || talent.referenceId || '';
-  const selectedName = selected ? (selected.name_fr || selected.name) : (talent.name || '');
+  const selectedName = talent.name || selected?.name_fr || selected?.name || '';
+  const preview = selected ? {
+    ...selected,
+    name: talent.name || selected.name,
+    name_fr: talent.nameFr || selected.name_fr,
+    name_original: talent.nameOriginal || selected.name_original,
+    category: talent.category || selected.category,
+    maxRank: talent.maxRank ?? selected.maxRank,
+    verificationStatus: talent.verificationStatus || selected.verificationStatus,
+    prerequisites: talent.prerequisites?.length ? talent.prerequisites : selected.prerequisites,
+    tests: talent.tests?.length ? talent.tests : selected.tests,
+    skills: talent.skills?.length ? talent.skills : selected.skills,
+    sourceInfo: talent.sourceInfo || selected.sourceInfo
+  } : null;
   const listId = `talent-options-${String(talent.id || 'new-talent').replace(/[^a-zA-Z0-9_-]/g, '')}`;
   return `<div class="talent-picker" data-talent-picker data-reference-id="${escapeHTML(referenceId)}" data-list-id="${listId}">
     <input type="hidden" data-collection-field="name" value="${escapeHTML(selectedName)}">
-    <input type="hidden" data-collection-field="nameFr" value="${escapeHTML(selected?.name_fr || talent.nameFr || '')}">
-    <input type="hidden" data-collection-field="nameOriginal" value="${escapeHTML(selected?.name_original || talent.nameOriginal || '')}">
-    <input type="hidden" data-collection-field="category" value="${escapeHTML(selected?.category || talent.category || '')}">
-    <input type="hidden" data-collection-field="maxRank" value="${escapeHTML(selected?.maxRank ?? talent.maxRank ?? '')}">
-    <input type="hidden" data-collection-field="verificationStatus" value="${escapeHTML(selected?.verificationStatus || talent.verificationStatus || '')}">
-    <input type="hidden" data-collection-field="prerequisites" value="${escapeHTML((selected?.prerequisites || talent.prerequisites || []).join(' ; '))}">
-    <input type="hidden" data-collection-field="tests" value="${escapeHTML((selected?.tests || talent.tests || []).join(' ; '))}">
-    <input type="hidden" data-collection-field="skills" value="${escapeHTML((selected?.skills || talent.skills || []).join(' ; '))}">
+    <input type="hidden" data-collection-field="nameFr" value="${escapeHTML(talent.nameFr || selected?.name_fr || '')}">
+    <input type="hidden" data-collection-field="nameOriginal" value="${escapeHTML(talent.nameOriginal || selected?.name_original || '')}">
+    <input type="hidden" data-collection-field="category" value="${escapeHTML(talent.category || selected?.category || '')}">
+    <input type="hidden" data-collection-field="maxRank" value="${escapeHTML(talent.maxRank ?? selected?.maxRank ?? '')}">
+    <input type="hidden" data-collection-field="verificationStatus" value="${escapeHTML(talent.verificationStatus || selected?.verificationStatus || '')}">
+    <input type="hidden" data-collection-field="prerequisites" value="${escapeHTML((talent.prerequisites?.length ? talent.prerequisites : selected?.prerequisites || []).join(' ; '))}">
+    <input type="hidden" data-collection-field="tests" value="${escapeHTML((talent.tests?.length ? talent.tests : selected?.tests || []).join(' ; '))}">
+    <input type="hidden" data-collection-field="skills" value="${escapeHTML((talent.skills?.length ? talent.skills : selected?.skills || []).join(' ; '))}">
     <div class="talent-picker-selected" data-talent-selected>${escapeHTML(selectedName || 'Aucun talent sélectionné')}</div>
     ${!selected && talent.name ? '<small class="form-hint talent-picker-legacy">Nom historique conservé : associez-le à une entrée du catalogue pour bénéficier de ses informations.</small>' : ''}
     <div class="reference-picker-control">
@@ -51,7 +65,7 @@ export function renderTalentPicker(talent = {}, catalog = []) {
       <button type="button" class="reference-picker-clear" data-talent-clear aria-label="Effacer le talent" title="Effacer la sélection">×</button>
     </div>
     <div class="reference-picker-list" id="${listId}" role="listbox" hidden></div>
-    <p class="reference-picker-info" data-talent-info>${escapeHTML(talentSummary(selected))}</p>
+    <p class="reference-picker-info" data-talent-info>${escapeHTML(talentSummary(preview))}</p>
   </div>`;
 }
 
@@ -77,20 +91,35 @@ export function mountTalentPickers(root, catalog) {
     if (selected) {
       wrapper.dataset.referenceId = selected.id;
       row.dataset.referenceId = selected.id;
-      row.dataset.maxRank = selected.maxRank ?? '';
+      row.dataset.maxRank ||= selected.maxRank ?? '';
       if (!row.dataset.sourceInfo || row.dataset.sourceInfo === '{}') row.dataset.sourceInfo = JSON.stringify(selected.sourceInfo || {});
+      if (!row.dataset.references || row.dataset.references === '[]') row.dataset.references = JSON.stringify(selected.references || []);
       if (!hadReferenceId && !hadCharacterEffects) row.dataset.effects = JSON.stringify(selected.effects || []);
-      nameField.value = selected.name_fr || selected.name;
-      wrapper.querySelector('[data-collection-field="nameFr"]').value = selected.name_fr || '';
-      wrapper.querySelector('[data-collection-field="nameOriginal"]').value = selected.name_original || '';
-      wrapper.querySelector('[data-collection-field="category"]').value = selected.category || '';
-      wrapper.querySelector('[data-collection-field="maxRank"]').value = selected.maxRank ?? '';
-      wrapper.querySelector('[data-collection-field="verificationStatus"]').value = selected.verificationStatus || '';
-      wrapper.querySelector('[data-collection-field="prerequisites"]').value = (selected.prerequisites || []).join(' ; ');
-      wrapper.querySelector('[data-collection-field="tests"]').value = (selected.tests || []).join(' ; ');
-      wrapper.querySelector('[data-collection-field="skills"]').value = (selected.skills || []).join(' ; ');
-      selectedLabel.textContent = selected.name_fr || selected.name;
-      info.textContent = talentSummary(selected);
+      if (!hadReferenceId) nameField.value = selected.name_fr || selected.name;
+      const fillIfEmpty = (field, value) => {
+        const input = wrapper.querySelector(`[data-collection-field="${field}"]`);
+        if (input && !input.value) input.value = value ?? '';
+      };
+      fillIfEmpty('nameFr', selected.name_fr);
+      fillIfEmpty('nameOriginal', selected.name_original);
+      fillIfEmpty('category', selected.category);
+      fillIfEmpty('maxRank', selected.maxRank);
+      fillIfEmpty('verificationStatus', selected.verificationStatus);
+      fillIfEmpty('prerequisites', (selected.prerequisites || []).join(' ; '));
+      fillIfEmpty('tests', (selected.tests || []).join(' ; '));
+      fillIfEmpty('skills', (selected.skills || []).join(' ; '));
+      selectedLabel.textContent = nameField.value || selected.name_fr || selected.name;
+      info.textContent = talentSummary({
+        ...selected,
+        name_fr: wrapper.querySelector('[data-collection-field="nameFr"]').value || selected.name_fr,
+        name_original: wrapper.querySelector('[data-collection-field="nameOriginal"]').value || selected.name_original,
+        category: wrapper.querySelector('[data-collection-field="category"]').value || selected.category,
+        maxRank: wrapper.querySelector('[data-collection-field="maxRank"]').value || selected.maxRank,
+        prerequisites: wrapper.querySelector('[data-collection-field="prerequisites"]').value.split(' ; ').filter(Boolean),
+        tests: wrapper.querySelector('[data-collection-field="tests"]').value.split(' ; ').filter(Boolean),
+        skills: wrapper.querySelector('[data-collection-field="skills"]').value.split(' ; ').filter(Boolean),
+        sourceInfo: JSON.parse(row.dataset.sourceInfo || '{}')
+      });
       if (legacy) legacy.remove();
       const rank = row.querySelector('[data-collection-field="rank"]');
       if (rank && selected.maxRank) rank.max = String(selected.maxRank);
@@ -151,6 +180,7 @@ export function mountTalentPickers(root, catalog) {
       row.dataset.referenceId = entry.id;
       row.dataset.maxRank = entry.maxRank ?? '';
       row.dataset.sourceInfo = JSON.stringify(entry.sourceInfo || {});
+      row.dataset.references = JSON.stringify(entry.references || []);
       row.dataset.effects = JSON.stringify(entry.effects || []);
       nameField.value = entry.name_fr || entry.name;
       wrapper.querySelector('[data-collection-field="nameFr"]').value = entry.name_fr || '';
@@ -236,6 +266,7 @@ export function mountTalentPickers(root, catalog) {
       row.dataset.maxRank = '';
       row.dataset.sourceInfo = '{}';
       row.dataset.effects = '[]';
+      row.dataset.references = '[]';
       nameField.value = '';
       for (const field of ['nameFr', 'nameOriginal', 'category', 'maxRank', 'verificationStatus', 'prerequisites', 'tests', 'skills']) {
         wrapper.querySelector(`[data-collection-field="${field}"]`).value = '';

@@ -32,6 +32,12 @@ function cleanDecimal(value) {
   return Number.isFinite(number) ? Math.max(0, Math.min(9999, Math.round(number * 100) / 100)) : null;
 }
 
+function cleanExperienceAmount(value) {
+  if (value === '' || value === null || value === undefined) return 0;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? Math.max(0, Math.min(1_000_000_000, number)) : 0;
+}
+
 function cleanDate(value, fallback) {
   if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return fallback;
   return value;
@@ -55,6 +61,8 @@ function cleanAdvancementList(value) {
       skillType: ['basic', 'advanced'].includes(source.skillType) ? source.skillType : '',
       advances: cleanNumber(source.advances) ?? 0,
       advancementCost: cleanNumber(source.advancementCost),
+      advancementCostVerified: source.advancementCostVerified === true,
+      advancementCostReference: cleanText(source.advancementCostReference, 500),
       career: Boolean(source.career),
       acquired: source.acquired !== false,
       status: ['suggested', 'selected', 'acquired'].includes(source.status) ? source.status : (source.acquired === false ? 'selected' : 'acquired'),
@@ -68,12 +76,17 @@ function cleanAdvancementList(value) {
 
 function cleanTalents(value) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 500).map((item) => {
+  const cleaned = value.slice(0, 500).map((item) => {
     const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    const maximumRank = cleanNumber(source.maxRank ?? source.max_rank);
     const effects = Array.isArray(source.effects) ? source.effects.slice(0, 50).map((effect) => {
       const entry = effect && typeof effect === 'object' && !Array.isArray(effect) ? effect : {};
       return {
         type: cleanText(entry.type, 50) || 'none',
+        target: cleanText(entry.target, 120),
+        resource: cleanText(entry.resource, 80),
+        operation: cleanText(entry.operation, 30),
+        formula: cleanText(entry.formula, 500),
         characteristic: CHARACTERISTICS.some(({ key }) => key === entry.characteristic) ? entry.characteristic : '',
         skillId: cleanText(entry.skillId, 180),
         skillName: cleanText(entry.skillName, 160),
@@ -93,7 +106,7 @@ function cleanTalents(value) {
       tests: Array.isArray(source.tests) ? source.tests.slice(0, 30).map((item) => cleanText(item, 200)).filter(Boolean) : [],
       skills: Array.isArray(source.skills) ? source.skills.slice(0, 50).map((item) => cleanText(item, 200)).filter(Boolean) : [],
       rank: Math.max(1, cleanNumber(source.rank) ?? 1),
-      maxRank: cleanNumber(source.maxRank ?? source.max_rank),
+      maxRank: Number.isInteger(maximumRank) && maximumRank >= 1 && maximumRank <= 999 ? maximumRank : null,
       description: cleanText(source.description, 3000),
       conditions: cleanText(source.conditions, 2000),
       prerequisites: Array.isArray(source.prerequisites)
@@ -116,6 +129,9 @@ function cleanTalents(value) {
         : [],
       effects,
       advancementCost: cleanNumber(source.advancementCost),
+      advancementCostVerified: source.advancementCostVerified === true,
+      advancementCostReference: cleanText(source.advancementCostReference, 500),
+      prerequisitesVerified: source.prerequisitesVerified === true,
       acquired: source.acquired !== false,
       status: ['suggested', 'selected', 'acquired'].includes(source.status) ? source.status : (source.acquired === false ? 'selected' : 'acquired'),
       sourceCareerId: cleanText(source.sourceCareerId, 180),
@@ -124,6 +140,62 @@ function cleanTalents(value) {
       notes: cleanText(source.notes, 2000)
     };
   }).filter((item) => item.name);
+
+  // Les répétitions d'un talent représentent ses rangs, pas des effets à
+  // additionner plusieurs fois. Les références stables permettent aussi de
+  // reconnaître un même talent lorsque son libellé a changé.
+  const byReference = new Map();
+  const byName = new Map();
+  const result = [];
+  const normalizeName = (name) => cleanText(name, 160)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('fr-FR');
+  for (const talent of cleaned) {
+    const nameKeys = [talent.name, talent.nameFr, talent.nameOriginal].map(normalizeName).filter(Boolean);
+    const existing = (talent.referenceId && byReference.get(talent.referenceId))
+      || nameKeys.map((key) => byName.get(key)).find((candidate) => candidate
+        && (!talent.referenceId || !candidate.referenceId || talent.referenceId === candidate.referenceId));
+    if (!existing) {
+      result.push(talent);
+      if (talent.referenceId) byReference.set(talent.referenceId, talent);
+      nameKeys.forEach((key) => byName.set(key, talent));
+      continue;
+    }
+    existing.rank = Math.max(existing.rank, talent.rank);
+    existing.maxRank ??= talent.maxRank;
+    existing.acquired = existing.acquired || talent.acquired;
+    existing.status = existing.acquired ? 'acquired' : 'selected';
+    existing.advancementCost ??= talent.advancementCost;
+    existing.advancementCostVerified ||= talent.advancementCostVerified;
+    existing.advancementCostReference ||= talent.advancementCostReference;
+    existing.prerequisitesVerified ||= talent.prerequisitesVerified;
+    existing.description ||= talent.description;
+    existing.conditions ||= talent.conditions;
+    existing.category ||= talent.category;
+    existing.nameFr ||= talent.nameFr;
+    existing.nameOriginal ||= talent.nameOriginal;
+    existing.verificationStatus ||= talent.verificationStatus;
+    existing.sourceInfo ||= talent.sourceInfo;
+    existing.sourceCareerId ||= talent.sourceCareerId;
+    existing.sourceCareerLevelId ||= talent.sourceCareerLevelId;
+    existing.sourceSpeciesId ||= talent.sourceSpeciesId;
+    existing.tests = [...new Set([...existing.tests, ...talent.tests])];
+    existing.skills = [...new Set([...existing.skills, ...talent.skills])];
+    existing.prerequisites = [...new Set([...existing.prerequisites, ...talent.prerequisites])];
+    existing.references = [...new Set([...existing.references, ...talent.references])];
+    const effectKeys = new Set(existing.effects.map((effect) => JSON.stringify(effect)));
+    for (const effect of talent.effects) {
+      const key = JSON.stringify(effect);
+      if (!effectKeys.has(key)) {
+        existing.effects.push(effect);
+        effectKeys.add(key);
+      }
+    }
+    if (talent.referenceId) byReference.set(talent.referenceId, existing);
+    nameKeys.forEach((key) => byName.set(key, existing));
+  }
+  return result;
 }
 
 function cleanEquipmentList(value) {
@@ -149,29 +221,89 @@ function cleanExperienceHistory(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(-1000).map((item) => {
     const source = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+    const cleanChange = (change) => {
+      const entry = change && typeof change === 'object' && !Array.isArray(change) ? change : {};
+      const targetPath = cleanText(entry.targetPath, 300);
+      const cleanValue = (value) => targetPath.startsWith('experience.')
+        ? (Number.isSafeInteger(Number(value)) && Math.abs(Number(value)) <= 1_000_000_000 ? Number(value) : null)
+        : cleanNumber(value);
+      return {
+        targetPath,
+        targetId: cleanText(entry.targetId, 180),
+        count: cleanNumber(entry.count) ?? 0,
+        previousValue: cleanValue(entry.previousValue),
+        newValue: cleanValue(entry.newValue)
+      };
+    };
+    const cleanAllocation = (allocation) => {
+      const entry = allocation && typeof allocation === 'object' && !Array.isArray(allocation) ? allocation : {};
+      return {
+        purchaseId: cleanText(entry.purchaseId, 120),
+        targetPath: cleanText(entry.targetPath, 300),
+        targetId: cleanText(entry.targetId, 180),
+        count: cleanNumber(entry.count) ?? 0,
+        amount: cleanExperienceAmount(entry.amount),
+        advancements: Array.isArray(entry.advancements) ? entry.advancements.slice(0, 999).map((item) => ({
+          number: cleanNumber(item?.number) ?? 0,
+          unitCost: cleanExperienceAmount(item?.unitCost),
+          amount: cleanExperienceAmount(item?.amount)
+        })) : []
+      };
+    };
     return {
       id: cleanId(source.id),
-      type: ['gain', 'purchase', 'undo'].includes(source.type) ? source.type : 'gain',
-      amount: cleanNumber(source.amount) ?? 0,
+      type: ['gain', 'purchase', 'refund', 'undo', 'correction', 'career-change'].includes(source.type) ? source.type : 'gain',
+      amount: cleanExperienceAmount(source.amount),
+      count: cleanNumber(source.count),
+      unitCost: source.unitCost === null || source.unitCost === undefined ? null : cleanExperienceAmount(source.unitCost),
       note: cleanText(source.note, 500),
       date: cleanDate(source.date, new Date().toISOString()),
       targetPath: cleanText(source.targetPath, 300),
+      targetId: cleanText(source.targetId, 180),
+      targetIds: Array.isArray(source.targetIds) ? [...new Set(source.targetIds.slice(0, 100).map((id) => cleanText(id, 180)).filter(Boolean))] : [],
       previousValue: cleanNumber(source.previousValue),
       newValue: cleanNumber(source.newValue),
-      reversedEntryId: cleanText(source.reversedEntryId, 120)
+      reversedEntryId: cleanText(source.reversedEntryId, 120),
+      originalOperationType: ['purchase', 'refund', 'gain', 'correction', 'career-change'].includes(source.originalOperationType) ? source.originalOperationType : '',
+      xpBefore: Number.isSafeInteger(Number(source.xpBefore)) && Math.abs(Number(source.xpBefore)) <= 1_000_000_000 ? Number(source.xpBefore) : null,
+      xpAfter: Number.isSafeInteger(Number(source.xpAfter)) && Math.abs(Number(source.xpAfter)) <= 1_000_000_000 ? Number(source.xpAfter) : null,
+      targetChanges: Array.isArray(source.targetChanges) ? source.targetChanges.slice(0, 50).map(cleanChange) : [],
+      advancementCosts: Array.isArray(source.advancementCosts) ? source.advancementCosts.slice(0, 999).map((entry) => ({
+        number: cleanNumber(entry?.number) ?? 0,
+        unitCost: cleanExperienceAmount(entry?.unitCost)
+      })) : [],
+      advancementNumber: cleanNumber(source.advancementNumber),
+      refundAllocations: Array.isArray(source.refundAllocations) ? source.refundAllocations.slice(0, 100).map(cleanAllocation) : [],
+      careerChange: source.careerChange && typeof source.careerChange === 'object'
+        ? {
+          previous: cleanCareerChangeValue(source.careerChange.previous),
+          next: cleanCareerChangeValue(source.careerChange.next)
+        }
+        : null
     };
   });
+}
+
+function cleanCareerChangeValue(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    careerId: cleanText(source.careerId, 180),
+    career: cleanText(source.career, 160),
+    careerLevelId: cleanText(source.careerLevelId, 180),
+    careerLevel: cleanText(source.careerLevel, 160),
+    careerCompleted: source.careerCompleted === true
+  };
 }
 
 export function createCharacter(overrides = {}) {
   const now = new Date().toISOString();
   return normalizeCharacter({
     id: createId(),
-    schemaVersion: 4,
+    schemaVersion: 6,
     identity: {
       firstName: '', lastName: '', species: '', speciesId: '', gender: '', age: null,
       height: '', weight: '', eyeColor: '', hairColor: '', origin: '',
-      religion: '', religionId: '', deity: '', deityId: '', career: '', careerId: '', careerLevel: '', careerLevelId: '', status: 'Actif'
+      religion: '', religionId: '', deity: '', deityId: '', career: '', careerId: '', careerLevel: '', careerLevelId: '', careerCompleted: false, status: 'Actif'
     },
     characteristics: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, null])),
     characteristicSpeciesModifiers: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, 0])),
@@ -209,7 +341,7 @@ export function normalizeCharacter(input) {
 
   return {
     id: cleanText(source.id, 100) || createId(),
-    schemaVersion: 4,
+    schemaVersion: 6,
     identity: {
       firstName: cleanText(identity.firstName, 100),
       lastName: cleanText(identity.lastName, 100),
@@ -230,6 +362,7 @@ export function normalizeCharacter(input) {
       careerId: cleanText(identity.careerId, 180),
       careerLevel: cleanText(identity.careerLevel, 160),
       careerLevelId: cleanText(identity.careerLevelId, 180),
+      careerCompleted: identity.careerCompleted === true,
       status: cleanText(identity.status, 40) || 'Actif'
     },
     characteristics: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, cleanNumber(characteristics[key])])),
@@ -266,8 +399,8 @@ export function normalizeCharacter(input) {
       resolve: cleanNumber(secondary.resolve)
     },
     experience: {
-      total: cleanNumber(experience.total) ?? 0,
-      spent: cleanNumber(experience.spent) ?? 0,
+      total: cleanExperienceAmount(experience.total),
+      spent: cleanExperienceAmount(experience.spent),
       history: cleanExperienceHistory(experience.history)
     },
     characteristicAdvances: Object.fromEntries(CHARACTERISTICS.map(({ key }) => [
@@ -333,8 +466,6 @@ export function validateCharacter(input) {
   const numericEntries = [
     ...Object.entries(input.characteristics),
     ...Object.entries(input.secondary),
-    ['total', input.experience.total],
-    ['spent', input.experience.spent],
     ['corruptionPoints', input.resources?.corruptionPoints],
     ['encumbranceCapacity', input.rules?.encumbranceCapacity],
     ['corruptionThreshold', input.rules?.corruptionThreshold]
@@ -342,6 +473,12 @@ export function validateCharacter(input) {
   for (const [key, value] of numericEntries) {
     if (value !== null && value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 9999)) {
       errors.push(`Valeur numérique invalide pour « ${key} ».`);
+    }
+  }
+  for (const key of ['total', 'spent']) {
+    const value = input.experience[key];
+    if (value !== null && value !== '' && (!Number.isSafeInteger(Number(value)) || Number(value) < 0 || Number(value) > 1_000_000_000)) {
+      errors.push(`Valeur numérique invalide pour « experience.${key} ».`);
     }
   }
   if (typeof input.identity.firstName !== 'string' || typeof input.identity.lastName !== 'string') {
@@ -405,5 +542,5 @@ export function getCharacterName(character) {
 }
 
 export function getExperienceAvailable(character) {
-  return Math.max(0, (character?.experience?.total || 0) - (character?.experience?.spent || 0));
+  return (character?.experience?.total || 0) - (character?.experience?.spent || 0);
 }

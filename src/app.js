@@ -1,5 +1,5 @@
 import { createCharacter, createId, getCharacterName, getExperienceAvailable, normalizeCharacter, CHARACTERISTICS } from './models/character.js';
-import { deleteCharacter, getAllCharacters, getCharacter, saveCharacter, getAllReferenceEntries, saveReferenceBundle } from './database/indexeddb.js';
+import { deleteCharacter, getAllCharacters, getCharacter, saveCharacter, saveCharacters, getAllReferenceEntries, saveReferenceBundle } from './database/indexeddb.js';
 import { createBackupExport, createCharacterExport, MAX_IMPORT_SIZE, parseImportPayload, prepareImportedCharacters } from './services/import-export.js';
 import {
   MAX_REFERENCE_IMPORT_SIZE, initializeBuiltInReferences,
@@ -11,15 +11,18 @@ import { renderReferencePicker, mountReferencePickers, isDeityCompatibleWithReli
 import { renderTalentPicker, mountTalentPickers } from './components/talent-picker.js';
 import { getRoute, navigate } from './router.js';
 import { renderDashboard, renderCharacterGrid } from './views/dashboard.js';
-import { renderCharacterDetail } from './views/character-detail.js';
 import { renderReferenceManager, renderReferenceEditor, renderCareerLevelsEditor, renderTalentCards, renderTalentEditor, filterReferenceCards } from './views/reference-manager.js';
-import { escapeHTML } from './utils/format.js';
+import { escapeHTML, formatDate } from './utils/format.js';
 import { generateCharacteristics, findSpeciesProfile } from './rules/characteristic-generator.js';
-import { calculateCharacteristics } from './rules/character-calculations.js';
+import { calculateCharacteristics, calculateTalentCharacteristicBonuses } from './rules/character-calculations.js';
 import { applyTheme, toggleTheme } from './services/theme.js';
-import { grantExperience, purchaseAdvancement, undoLastPurchase } from './services/progression.js';
-import { CREATION_STEPS, getCreationStepStates, getCreationSuggestions, mergeSuggestedEntries, validateCharacterCreation } from './services/creation-wizard.js';
-import { createTalentCatalogExport, filterTalentCatalog, findTalentReference, normalizeTalentText, parseTalentPack, prepareTalentPack } from './services/talents.js';
+import {
+  correctExperience, grantExperience, purchaseAdvancement, undoLastPurchase,
+  refundAdvancements, quoteProgressionRefund, purchaseCareerChange, getRefundableProgressionCount
+} from './services/progression.js';
+import { CAREER_CHANGE_COST, getNextAdvancementCost } from './rules/progression-costs.js';
+import { getCreationSuggestions, mergeSuggestedEntries } from './services/creation-wizard.js';
+import { createTalentCatalogExport, filterTalentCatalog, findTalentNameConflict, findTalentReference, mergeCharacterTalentEntries, normalizeTalentText, parseTalentPack, prepareTalentPack } from './services/talents.js';
 
 const viewRoot = document.querySelector('#view-root');
 const modalRoot = document.querySelector('#modal-root');
@@ -36,8 +39,6 @@ let editorState = null;
 let saveTimer;
 let editorSaveQueue = Promise.resolve();
 let toastTimer;
-
-const OPTIONAL_CREATION_STEPS = new Set(['religion', 'skills', 'talents', 'resources']);
 
 function clone(value) {
   return globalThis.structuredClone ? structuredClone(value) : JSON.parse(JSON.stringify(value));
@@ -73,14 +74,9 @@ function updateSidebar() {
       : route.name === 'character' ? 'characters' : 'dashboard';
     link.classList.toggle('is-active', link.dataset.nav === activeNav);
   });
-  const currentWizardStep = editorState?.guided
-    ? CREATION_STEPS.find((step) => step.id === editorState.character.creationWizard?.step)
-    : null;
-  document.querySelector('#breadcrumb-current').textContent = currentWizardStep
-    ? `CRÉATION · ${currentWizardStep.title.toLocaleUpperCase('fr-FR')}`
-    : route.name === 'character'
-      ? 'FICHE PERSONNAGE'
-      : route.name === 'references' ? 'RÉFÉRENTIELS' : 'TABLEAU DE BORD';
+  document.querySelector('#breadcrumb-current').textContent = route.name === 'character'
+    ? 'FICHE PERSONNAGE'
+    : route.name === 'references' ? 'RÉFÉRENTIELS' : 'TABLEAU DE BORD';
 }
 
 function filteredCharacters() {
@@ -128,9 +124,10 @@ function renderCurrentRoute() {
       viewRoot.innerHTML = `<section class="not-found"><span class="empty-emblem">✧</span><h1>Cette fiche est introuvable</h1><p>Elle a peut-être été supprimée ou déplacée.</p><a class="button button-primary" href="#/">Retour au registre</a></section>`;
       return;
     }
-    viewRoot.innerHTML = renderCharacterDetail(character, referenceEntries);
+    openEditor(character);
     return;
   }
+  editorState = null;
   viewRoot.innerHTML = renderDashboard(characters);
   filterState.query = '';
   filterState.sort = 'updated';
@@ -144,14 +141,18 @@ function renderCurrentRoute() {
 }
 
 async function refreshCharacters({ render = true } = {}) {
+  if (render && editorState) {
+    clearTimeout(saveTimer);
+    await queueEditorSave();
+  }
   characters = await getAllCharacters();
   if (render) renderCurrentRoute();
   else updateSidebar();
 }
 
 function field(label, name, value, options = {}) {
-  const { type = 'text', placeholder = '', wide = false, min, max, step } = options;
-  const attributes = [min !== undefined ? `min="${min}"` : '', max !== undefined ? `max="${max}"` : '', step !== undefined ? `step="${step}"` : ''].filter(Boolean).join(' ');
+  const { type = 'text', placeholder = '', wide = false, min, max, step, readOnly = false } = options;
+  const attributes = [min !== undefined ? `min="${min}"` : '', max !== undefined ? `max="${max}"` : '', step !== undefined ? `step="${step}"` : '', readOnly ? 'readonly' : ''].filter(Boolean).join(' ');
   const className = wide ? 'form-field form-field-wide' : 'form-field';
   return `<label class="${className}"><span>${label}</span><input type="${type}" name="${name}" value="${escapeHTML(value ?? '')}" placeholder="${escapeHTML(placeholder)}" ${attributes}></label>`;
 }
@@ -228,61 +229,121 @@ function characteristicEditorMarkup(character) {
   const rows = CHARACTERISTICS.map(({ key, label, shortLabel }) => {
     const stat = calculated[key];
     const speciesBonusValue = character.characteristicSpeciesModifiers?.[key];
+    const advanceCount = character.characteristicAdvances?.[key] || 0;
+    const nextCost = getNextAdvancementCost('characteristic', advanceCount);
+    const refundableCount = getRefundableProgressionCount(character, { type: 'characteristic', key });
     return `<tr data-characteristic-row data-key="${key}">
       <th scope="row"><abbr title="${escapeHTML(label)}">${escapeHTML(shortLabel)}</abbr><span>${escapeHTML(label)}</span></th>
       <td><input type="number" min="0" max="999" step="1" name="characteristics.${key}" value="${escapeHTML(character.characteristics[key] ?? '')}" aria-label="${escapeHTML(label)} valeur initiale" data-stat-initial></td>
       <td><output data-stat-species>${stat.speciesBonus ?? '—'}</output><input type="hidden" name="characteristicSpeciesModifiers.${key}" value="${escapeHTML(speciesBonusValue === null ? '' : speciesBonusValue ?? 0)}" data-stat-species-value></td>
       <td><output data-stat-talent>${stat.talentBonus}</output></td>
-      <td><input type="number" min="0" max="999" step="1" name="characteristicAdvances.${key}" value="${escapeHTML(character.characteristicAdvances?.[key] ?? 0)}" aria-label="${escapeHTML(label)} augmentations" data-stat-advances></td>
+      <td><input type="number" min="0" max="999" step="1" name="characteristicAdvances.${key}" value="${escapeHTML(character.characteristicAdvances?.[key] ?? 0)}" aria-label="${escapeHTML(label)} augmentations" data-stat-advances readonly title="Les augmentations se font depuis la progression XP de la fiche."></td>
       <td><output class="calculated-value" data-stat-current>${stat.current ?? '—'}</output></td>
       <td><output class="calculated-bonus" data-stat-bonus>${stat.bonus ?? '—'}</output></td>
-      <td><input class="cost-input" type="number" min="1" max="9999" step="1" name="characteristicAdvancementCosts.${key}" value="${escapeHTML(character.characteristicAdvancementCosts?.[key] ?? '')}" placeholder="—" aria-label="Coût configuré de l’augmentation ${shortLabel}" title="Coût configuré depuis votre source de règles"></td>
+      <td>${nextCost === null ? '<span class="muted-copy">Maximum atteint</span>' : `<button class="table-action" type="button" data-action="purchase-advancement" data-target-type="characteristic" data-target-key="${key}" data-character-id="${escapeHTML(character.id)}">+1 · ${nextCost} XP</button>`}</td>
+      <td>${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="characteristics" data-target-type="characteristic" data-target-key="${key}"><small data-refund-line-total>0 XP</small></label>` : '<span class="muted-copy">—</span>'}</td>
     </tr>`;
   }).join('');
-  return `<div class="responsive-table editor-table-wrap"><table class="data-table characteristic-editor-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augm.</th><th>Actuelle</th><th>Bonus</th><th>Coût XP / +1</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="responsive-table editor-table-wrap"><table class="data-table characteristic-editor-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augm.</th><th>Actuelle</th><th>Bonus</th><th>Acheter</th><th>Rembourser</th></tr></thead><tbody>${rows}</tbody></table></div><div class="refund-actions" data-refund-scope="characteristics" data-character-id="${escapeHTML(character.id)}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="characteristics" data-character-id="${escapeHTML(character.id)}" disabled>Rembourser les augmentations sélectionnées</button></div>`;
 }
 
-function renderSkillEditorRow(skill = {}) {
+function renderSkillEditorRow(skill = {}, _collection = 'skills', character = null) {
+  const rowId = skill.id || createId();
+  const nextCost = getNextAdvancementCost('skill', skill.advances || 0);
+  const refundableCount = character ? getRefundableProgressionCount(character, { type: 'skill', id: rowId }) : 0;
   const characteristicOptions = ['<option value="">—</option>', ...CHARACTERISTICS.map(({ key, shortLabel }) => (
     `<option value="${key}" ${skill.characteristic === key ? 'selected' : ''}>${shortLabel}</option>`
   ))].join('');
   const skillTypeOptions = `<option value="">Non défini</option><option value="basic" ${skill.skillType === 'basic' ? 'selected' : ''}>Base</option><option value="advanced" ${skill.skillType === 'advanced' ? 'selected' : ''}>Avancée</option>`;
-  return `<div class="editor-list-row skill-editor-row" data-item-row data-collection="skills" data-item-id="${escapeHTML(skill.id || createId())}" data-reference-id="${escapeHTML(skill.referenceId || '')}" data-source-career-id="${escapeHTML(skill.sourceCareerId || '')}" data-source-career-level-id="${escapeHTML(skill.sourceCareerLevelId || '')}" data-source-species-id="${escapeHTML(skill.sourceSpeciesId || '')}">
+  return `<div class="editor-list-row skill-editor-row" data-item-row data-collection="skills" data-item-id="${escapeHTML(rowId)}" data-reference-id="${escapeHTML(skill.referenceId || '')}" data-source-career-id="${escapeHTML(skill.sourceCareerId || '')}" data-source-career-level-id="${escapeHTML(skill.sourceCareerLevelId || '')}" data-source-species-id="${escapeHTML(skill.sourceSpeciesId || '')}">
     <label><span>Compétence</span><input data-collection-field="name" value="${escapeHTML(skill.name || '')}" maxlength="160"></label>
     <label><span>Carac.</span><select data-collection-field="characteristic">${characteristicOptions}</select></label>
     <label><span>Type</span><select data-collection-field="skillType">${skillTypeOptions}</select></label>
     <label><span>Base manuelle</span><input type="number" min="0" max="999" data-collection-field="baseValue" value="${escapeHTML(skill.baseValue ?? '')}" placeholder="Carac."></label>
-    <label><span>Avanc.</span><input type="number" min="0" max="999" data-collection-field="advances" value="${escapeHTML(skill.advances ?? 0)}"></label>
-    <label><span>Coût XP / +1</span><input type="number" min="1" max="9999" data-collection-field="advancementCost" value="${escapeHTML(skill.advancementCost ?? '')}" placeholder="—"></label>
+    <label><span>Avanc.</span><input type="number" min="0" max="999" data-collection-field="advances" value="${escapeHTML(skill.advances ?? 0)}" readonly title="Les avancements se font avec les boutons de progression XP de la fiche."></label>
+    <input type="hidden" data-collection-field="advancementCost" value="${escapeHTML(skill.advancementCost ?? '')}">
+    <input type="hidden" data-collection-field="advancementCostVerified" value="${skill.advancementCostVerified ? 'true' : ''}">
+    <input type="hidden" data-collection-field="advancementCostReference" value="${escapeHTML(skill.advancementCostReference || '')}">
     <label class="inline-check"><input type="checkbox" data-collection-field="useCharacteristicBase" ${skill.useCharacteristicBase !== false ? 'checked' : ''}><span>Base = caractéristique</span></label>
     <label class="inline-check"><input type="checkbox" data-collection-field="career" ${skill.career ? 'checked' : ''}><span>Compétence de carrière</span></label>
     <label class="inline-check"><input type="checkbox" data-collection-field="acquired" ${skill.acquired !== false ? 'checked' : ''}><span>Acquise</span></label>
+    ${nextCost !== null ? `<button type="button" class="table-action progression-row-action" data-inline-progression data-action="purchase-advancement" data-character-id="${escapeHTML(character?.id || '')}" data-target-type="skill" data-target-id="${escapeHTML(rowId)}" ${skill.acquired === false ? 'disabled' : ''}>+1 · ${nextCost} XP</button>` : '<span class="muted-copy progression-row-action">Maximum atteint</span>'}
+    ${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="skills" data-target-type="skill" data-target-id="${escapeHTML(rowId)}"><small data-refund-line-total>0 XP</small></label>` : ''}
     <button type="button" class="icon-button danger-button" data-collection-action="remove" aria-label="Supprimer cette compétence" title="Supprimer">×</button>
   </div>`;
 }
 
-function renderTalentEditorRow(talent = {}) {
+function renderTalentEditorRow(talent = {}, _collection = 'talents', character = null) {
   const rowId = talent.id || createId();
+  const currentRank = talent.acquired === false ? 0 : (talent.rank || 1);
+  const nextCost = getNextAdvancementCost('talent', currentRank);
+  const refundableCount = character ? getRefundableProgressionCount(character, { type: 'talent', id: rowId }) : 0;
+  const hasMaximumRank = Boolean(talent.maxRank && currentRank >= talent.maxRank);
+  const requiresPrerequisiteVerification = Boolean(((talent.conditions || '').trim() || talent.prerequisites?.length) && talent.acquired === false);
   const effect = (talent.effects || []).find((item) => item.type === 'characteristicBonus') || {};
   const characteristicOptions = ['<option value="">—</option>', ...CHARACTERISTICS.map(({ key, shortLabel }) => (
     `<option value="${key}" ${effect.characteristic === key ? 'selected' : ''}>${shortLabel}</option>`
   ))].join('');
   return `<div class="editor-list-row talent-editor-row" data-item-row data-collection="talents" data-item-id="${escapeHTML(rowId)}" data-reference-id="${escapeHTML(talent.referenceId || '')}" data-source-career-id="${escapeHTML(talent.sourceCareerId || '')}" data-source-career-level-id="${escapeHTML(talent.sourceCareerLevelId || '')}" data-source-species-id="${escapeHTML(talent.sourceSpeciesId || '')}" data-max-rank="${escapeHTML(talent.maxRank ?? '')}" data-source-info="${escapeHTML(JSON.stringify(talent.sourceInfo || {}))}" data-references="${escapeHTML(JSON.stringify(talent.references || []))}" data-effects="${escapeHTML(JSON.stringify(talent.effects || []))}">
     <label class="talent-selection-field"><span>Talent · rechercher dans le catalogue</span>${renderTalentPicker({ ...talent, id: rowId }, referenceEntries)}<small class="talent-source-note">${escapeHTML(talentSuggestionReason(talent))}</small></label>
-    <label><span>Rang</span><input type="number" min="1" max="999" data-collection-field="rank" value="${escapeHTML(talent.rank ?? 1)}"></label>
-    <label><span>Coût XP / rang</span><input type="number" min="1" max="9999" data-collection-field="advancementCost" value="${escapeHTML(talent.advancementCost ?? '')}" placeholder="—"></label>
-    <label class="inline-check"><input type="checkbox" data-collection-field="acquired" ${talent.acquired !== false ? 'checked' : ''}><span>Acquis</span></label>
+    <label><span>Rang</span><input type="number" min="1" max="999" data-collection-field="rank" value="${escapeHTML(talent.rank ?? 1)}" readonly title="Les rangs se gagnent et se remboursent avec les boutons de progression XP de la fiche."></label>
+    <input type="hidden" data-collection-field="advancementCost" value="${escapeHTML(talent.advancementCost ?? '')}">
+    <input type="hidden" data-collection-field="advancementCostVerified" value="${talent.advancementCostVerified ? 'true' : ''}">
+    <label class="inline-check"><input type="checkbox" data-collection-field="prerequisitesVerified" ${talent.prerequisitesVerified ? 'checked' : ''}><span>Conditions / prérequis vérifiés</span></label>
+    <label class="inline-check"><input type="checkbox" data-collection-field="acquired" ${talent.acquired !== false ? 'checked' : ''} disabled><span>Acquis (via progression XP)</span></label>
     <label><span>Bonus caractéristique</span><select data-collection-field="effectCharacteristic">${characteristicOptions}</select></label>
     <label><span>Valeur</span><input type="number" min="0" max="999" data-collection-field="effectValue" value="${escapeHTML(effect.value ?? 0)}"></label>
     <label class="inline-check"><input type="checkbox" data-collection-field="effectVerified" ${effect.verified ? 'checked' : ''}><span>Effet vérifié</span></label>
     <label class="talent-description"><span>Description</span><input data-collection-field="description" value="${escapeHTML(talent.description || '')}" maxlength="3000"></label>
     <label class="talent-description"><span>Conditions d’acquisition</span><input data-collection-field="conditions" value="${escapeHTML(talent.conditions || '')}" maxlength="2000" placeholder="Non renseignées"></label>
     <label class="talent-description"><span>Référence de règle pour l’effet</span><input data-collection-field="effectReference" value="${escapeHTML(effect.reference || '')}" maxlength="500" placeholder="Livre, page, errata…"></label>
+    ${!hasMaximumRank && nextCost !== null ? `<button type="button" class="table-action progression-row-action" data-inline-progression data-action="purchase-advancement" data-character-id="${escapeHTML(character?.id || '')}" data-target-type="talent" data-target-id="${escapeHTML(rowId)}" ${requiresPrerequisiteVerification && talent.prerequisitesVerified !== true ? 'disabled' : ''}>${talent.acquired === false ? 'Acquérir' : 'Rang suivant'} · ${nextCost} XP</button>` : '<span class="muted-copy progression-row-action">Rang maximum atteint</span>'}
+    ${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="talents" data-target-type="talent" data-target-id="${escapeHTML(rowId)}"><small data-refund-line-total>0 XP</small></label>` : ''}
     <button type="button" class="icon-button danger-button" data-collection-action="remove" aria-label="Supprimer ce talent" title="Supprimer">×</button>
   </div>`;
 }
 
+function updateInlineProgressionControls(form = document.querySelector('#character-form')) {
+  if (!form) return;
+  form.querySelectorAll('[data-item-row][data-collection="skills"]').forEach((row) => {
+    const button = row.querySelector('[data-inline-progression]');
+    const acquired = row.querySelector('[data-collection-field="acquired"]')?.checked === true;
+    if (button) button.disabled = !acquired;
+  });
+  form.querySelectorAll('[data-item-row][data-collection="talents"]').forEach((row) => {
+    const button = row.querySelector('[data-inline-progression]');
+    if (!button) return;
+    const acquired = row.querySelector('[data-collection-field="acquired"]')?.checked === true;
+    const verified = row.querySelector('[data-collection-field="prerequisitesVerified"]')?.checked === true;
+    const conditions = row.querySelector('[data-collection-field="conditions"]')?.value?.trim() || '';
+    const prerequisites = row.querySelector('[data-collection-field="prerequisites"]')?.value?.trim() || '';
+    button.disabled = !acquired && Boolean(conditions || prerequisites) && !verified;
+    button.title = button.disabled ? 'Vérifiez les conditions et prérequis avant l’acquisition.' : '';
+  });
+  const careerCompleted = form.querySelector('[name="identity.careerCompleted"]')?.checked === true;
+  const careerChange = form.querySelector('[data-action="change-career"]');
+  const careerPicker = form.querySelector('[data-career-change-career]');
+  const levelPicker = form.querySelector('[data-career-change-level]');
+  const selectedCareer = referenceEntries.find((entry) => entry.kind === 'careers' && entry.id === careerPicker?.value);
+  if (levelPicker && levelPicker.dataset.careerId !== (selectedCareer?.id || '')) {
+    const levels = getCareerLevels(selectedCareer);
+    levelPicker.innerHTML = `<option value="">${levels.length ? 'Choisir un niveau…' : 'Aucun niveau défini'}</option>${levels.map((level) => `<option value="${escapeHTML(level.id)}">${escapeHTML(level.rank)} · ${escapeHTML(level.name)}</option>`).join('')}`;
+    levelPicker.dataset.careerId = selectedCareer?.id || '';
+    if (levels.length === 1) levelPicker.value = levels[0].id;
+  }
+  if (levelPicker) levelPicker.disabled = !selectedCareer || getCareerLevels(selectedCareer).length <= 1;
+  const levels = getCareerLevels(selectedCareer);
+  const currentCareerId = form.querySelector('[data-reference-picker="careers"] [data-picker-id]')?.value || '';
+  const sameCareer = Boolean(selectedCareer && currentCareerId && selectedCareer.id === currentCareerId);
+  if (careerChange) careerChange.disabled = !careerCompleted || !selectedCareer || sameCareer || (levels.length > 1 && !levelPicker?.value);
+}
+
 function talentSuggestionReason(talent = {}) {
+  if (talent.acquired === true && (talent.sourceCareerId || talent.sourceSpeciesId)) {
+    return talent.sourceSpeciesId
+      ? 'Talent proposé par l’espèce puis acquis.'
+      : 'Talent proposé par la carrière puis acquis.';
+  }
   if (talent.sourceSpeciesId) {
     const species = referenceEntries.find((entry) => entry.kind === 'species' && entry.id === talent.sourceSpeciesId);
     return `Proposé par l’espèce : ${species?.name || 'référentiel d’espèce'}. À confirmer par le joueur.`;
@@ -309,9 +370,10 @@ function renderEquipmentEditorRow(item = {}, category = 'possessions') {
   </div>`;
 }
 
-function renderCollectionSection(title, collection, entries, rowRenderer, description = '') {
-  const rows = entries.length ? entries.map((entry) => rowRenderer(entry, collection)).join('') : '<p class="collection-empty">Aucune entrée. Utilisez le bouton pour en ajouter une.</p>';
-  return `<div class="editor-collection"><div class="editor-collection-heading"><div><h4>${title}</h4>${description ? `<p>${description}</p>` : ''}</div><button type="button" class="button button-outline button-small" data-collection-action="add" data-collection="${collection}">＋ Ajouter</button></div><div class="editor-collection-rows" id="collection-${collection}" data-collection="${collection}">${rows}</div></div>`;
+function renderCollectionSection(title, collection, entries, rowRenderer, description = '', character = null) {
+  const rows = entries.length ? entries.map((entry) => rowRenderer(entry, collection, character)).join('') : '<p class="collection-empty">Aucune entrée. Utilisez le bouton pour en ajouter une.</p>';
+  const refundActions = ['skills', 'talents'].includes(collection) ? `<div class="refund-actions" data-refund-scope="${collection}" data-character-id="${escapeHTML(character?.id || '')}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="${collection}" data-character-id="${escapeHTML(character?.id || '')}" disabled>Rembourser la sélection</button></div>` : '';
+  return `<div class="editor-collection"><div class="editor-collection-heading"><div><h4>${title}</h4>${description ? `<p>${description}</p>` : ''}</div><button type="button" class="button button-outline button-small" data-collection-action="add" data-collection="${collection}">＋ Ajouter</button></div><div class="editor-collection-rows" id="collection-${collection}" data-collection="${collection}">${rows}</div>${refundActions}</div>`;
 }
 
 function readEditorCollection(form, collection) {
@@ -322,12 +384,17 @@ function readEditorCollection(form, collection) {
       const raw = value(fieldName);
       return raw === '' ? null : Number(raw);
     };
-    const checkbox = (fieldName) => Boolean(read(fieldName)?.checked);
+    const checkbox = (fieldName) => {
+      const control = read(fieldName);
+      return control?.type === 'checkbox' ? control.checked : control?.value === 'true';
+    };
     if (collection === 'skills') return {
       id: row.dataset.itemId || createId(), referenceId: row.dataset.referenceId || '', name: value('name'), characteristic: value('characteristic'),
       skillType: value('skillType'),
       baseValue: number('baseValue'), useCharacteristicBase: checkbox('useCharacteristicBase'),
-      advances: number('advances') ?? 0, advancementCost: number('advancementCost'), career: checkbox('career'),
+      advances: number('advances') ?? 0, advancementCost: number('advancementCost'),
+      advancementCostVerified: checkbox('advancementCostVerified'),
+      advancementCostReference: value('advancementCostReference'), career: checkbox('career'),
       acquired: checkbox('acquired'), status: checkbox('acquired') ? 'acquired' : 'selected',
       sourceCareerId: row.dataset.sourceCareerId || '', sourceCareerLevelId: row.dataset.sourceCareerLevelId || '', sourceSpeciesId: row.dataset.sourceSpeciesId || ''
     };
@@ -340,11 +407,13 @@ function readEditorCollection(form, collection) {
       try { historicalReferences = JSON.parse(row.dataset.references || '[]'); } catch { historicalReferences = []; }
       let storedEffects = [];
       try { storedEffects = JSON.parse(row.dataset.effects || '[]'); } catch { storedEffects = []; }
+      const storedCharacteristicEffects = storedEffects.filter((effect) => effect?.type === 'characteristicBonus');
       const effects = storedEffects.filter((effect) => effect?.type !== 'characteristicBonus');
       if (effectCharacteristic) effects.push({
         type: 'characteristicBonus', characteristic: effectCharacteristic,
         value: number('effectValue') ?? 0, verified: checkbox('effectVerified'), reference: value('effectReference')
       });
+      effects.push(...storedCharacteristicEffects.slice(1));
       return {
         id: row.dataset.itemId || createId(), referenceId: row.dataset.referenceId || '', name: value('name'), rank: number('rank') ?? 1,
         maxRank: number('maxRank') ?? (row.dataset.maxRank ? Number(row.dataset.maxRank) : null),
@@ -353,7 +422,9 @@ function readEditorCollection(form, collection) {
         description: value('description'), conditions: value('conditions'), prerequisites: value('prerequisites').split(' ; ').filter(Boolean),
         verificationStatus: value('verificationStatus'), sourceInfo: { ...(reference?.sourceInfo || {}), ...historicalSourceInfo },
         references: reference?.references?.length ? reference.references : (historicalReferences.length ? historicalReferences : (historicalSourceInfo.title ? [`${historicalSourceInfo.title}${historicalSourceInfo.page ? `, p. ${historicalSourceInfo.page}` : ''}`] : [])),
-        advancementCost: number('advancementCost'), effects,
+        advancementCost: number('advancementCost'),
+        advancementCostVerified: checkbox('advancementCostVerified'),
+        prerequisitesVerified: checkbox('prerequisitesVerified'), effects,
         acquired: checkbox('acquired'), status: checkbox('acquired') ? 'acquired' : 'selected',
         sourceCareerId: row.dataset.sourceCareerId || '', sourceCareerLevelId: row.dataset.sourceCareerLevelId || '', sourceSpeciesId: row.dataset.sourceSpeciesId || ''
       };
@@ -368,39 +439,29 @@ function readEditorCollection(form, collection) {
     else item.qualities = detail;
     return item;
   }).filter((entry) => entry.name);
-  if (collection !== 'talents') return entries;
-  const uniqueTalents = new Map();
-  for (const talent of entries) {
-    const key = talent.referenceId || normalizeTalentText(talent.name);
-    const existing = uniqueTalents.get(key);
-    if (!existing) {
-      uniqueTalents.set(key, talent);
-      continue;
-    }
-    // Plusieurs occurrences d'un même talent représentent des rangs, pas
-    // plusieurs talents distincts. Conserver le rang le plus élevé.
-    existing.rank = Math.max(existing.rank || 1, talent.rank || 1);
-    existing.maxRank ??= talent.maxRank;
-    existing.acquired = existing.acquired || talent.acquired;
-    existing.status = existing.acquired ? 'acquired' : 'selected';
-    existing.advancementCost ??= talent.advancementCost;
-    if (!existing.description) existing.description = talent.description;
-    if (!existing.conditions) existing.conditions = talent.conditions;
-    if (!existing.references.length) existing.references = talent.references;
-  }
-  return [...uniqueTalents.values()];
+  return collection === 'talents' ? mergeCharacterTalentEntries(entries) : entries;
 }
 
 function updateCharacteristicPreviews(form) {
   if (!form) return;
-  const talentBonuses = Object.fromEntries(CHARACTERISTICS.map(({ key }) => [key, 0]));
-  for (const row of form.querySelectorAll('[data-item-row][data-collection="talents"]')) {
-    const verified = row.querySelector('[data-collection-field="effectVerified"]')?.checked;
+  const previewTalents = [...form.querySelectorAll('[data-item-row][data-collection="talents"]')].map((row) => {
+    let storedEffects = [];
+    try { storedEffects = JSON.parse(row.dataset.effects || '[]'); } catch { storedEffects = []; }
+    const storedCharacteristicEffects = storedEffects.filter((effect) => effect?.type === 'characteristicBonus');
     const key = row.querySelector('[data-collection-field="effectCharacteristic"]')?.value;
-    const value = Number(row.querySelector('[data-collection-field="effectValue"]')?.value || 0);
-    const reference = row.querySelector('[data-collection-field="effectReference"]')?.value?.trim();
-    if (verified && reference && Object.hasOwn(talentBonuses, key) && Number.isFinite(value)) talentBonuses[key] += value;
-  }
+    const editedFirstEffect = key ? {
+      ...(storedCharacteristicEffects[0] || {}),
+      type: 'characteristicBonus',
+      characteristic: key,
+      value: Number(row.querySelector('[data-collection-field="effectValue"]')?.value || 0),
+      verified: row.querySelector('[data-collection-field="effectVerified"]')?.checked === true,
+      reference: row.querySelector('[data-collection-field="effectReference"]')?.value?.trim() || ''
+    } : null;
+    const effects = [...(editedFirstEffect ? [editedFirstEffect] : []), ...storedCharacteristicEffects.slice(1)];
+    const acquired = row.querySelector('[data-collection-field="acquired"]')?.checked === true;
+    return { acquired, status: acquired ? 'acquired' : 'selected', effects };
+  });
+  const talentBonuses = calculateTalentCharacteristicBonuses(previewTalents);
   for (const { key } of CHARACTERISTICS) {
     const row = form.querySelector(`[data-characteristic-row][data-key="${key}"]`);
     if (!row) continue;
@@ -419,7 +480,6 @@ function updateCharacteristicPreviews(form) {
 }
 
 function updateSpeciesSelection(form) {
-  clearSkippedWizardStep('species');
   const speciesField = form.querySelector('[name="identity.species"]');
   const speciesName = speciesField?.value || '';
   const species = findSpeciesProfile(speciesName, referenceEntries);
@@ -453,11 +513,11 @@ function updateSpeciesSelection(form) {
     editorState.character.identity.speciesId = species?.id || '';
   }
   updateCharacteristicPreviews(form);
-  refreshWizardSuggestions();
+  refreshReferenceSuggestions();
   return true;
 }
 
-function refreshWizardSuggestions() {
+function refreshReferenceSuggestions() {
   const form = document.querySelector('#character-form');
   if (!form) return;
   const careerId = form.querySelector('[data-reference-picker="careers"] [data-picker-id]')?.value || '';
@@ -468,17 +528,27 @@ function refreshWizardSuggestions() {
   const species = referenceEntries.find((entry) => entry.kind === 'species' && entry.id === speciesId) || null;
   const careerSuggestions = getCreationSuggestions({ career, level });
   const speciesSuggestions = getCreationSuggestions({ species });
+  const currentTalents = readEditorCollection(form, 'talents');
+  const currentTalentNames = (talent) => [talent.name, talent.nameFr, talent.nameOriginal].map(normalizeTalentText).filter(Boolean);
   const catalogCareerTalents = referenceEntries.filter((entry) => entry.kind === 'talents' && (
     (career && (entry.careerIds || []).includes(career.id)) || (level && (entry.careerLevelIds || []).includes(level.id))
   ));
   const catalogSpeciesTalents = referenceEntries.filter((entry) => entry.kind === 'talents' && species && (entry.species || []).includes(species.id));
   const describeTalent = (entry, reason) => {
+    const candidateId = entry.id || entry.referenceId || '';
+    const candidateNames = [entry.name, entry.name_fr, entry.nameFr, entry.name_original, entry.nameOriginal, ...(entry.aliases || [])]
+      .map(normalizeTalentText).filter(Boolean);
+    const owned = currentTalents.find((talent) => (candidateId && talent.referenceId === candidateId)
+      || currentTalentNames(talent).some((name) => candidateNames.includes(name)));
     const details = [
       entry.maxRank ? `max. ${entry.maxRank} rang(s)` : '',
       ...(entry.prerequisites || []).map((item) => `prérequis : ${item}`),
       entry.conditions || ''
     ].filter(Boolean);
-    return `<li><strong>${escapeHTML(entry.name_fr || entry.name)}</strong> <span>— ${escapeHTML(reason)}${details.length ? ` · ${escapeHTML(details.join(' · '))}` : ''}</span></li>`;
+    const ownership = owned
+      ? owned.acquired ? `Déjà acquis · rang ${owned.rank}` : `Déjà sélectionné · rang ${owned.rank}, non acquis`
+      : 'À sélectionner';
+    return `<li><strong>${escapeHTML(entry.name_fr || entry.name)}</strong> <span>— ${escapeHTML(reason)} · ${escapeHTML(ownership)}${details.length ? ` · ${escapeHTML(details.join(' · '))}` : ''}</span></li>`;
   };
   const careerTalentNames = new Set(careerSuggestions.talents.map((item) => normalizeTalentText(item.name)));
   const catalogOnlyCareerTalents = catalogCareerTalents.filter((entry) => !careerTalentNames.has(normalizeTalentText(entry.name_fr || entry.name)));
@@ -516,7 +586,7 @@ function refreshWizardSuggestions() {
   }
 }
 
-function addWizardSuggestions(collection, sourceType) {
+function addReferenceSuggestions(collection, sourceType) {
   const form = document.querySelector('#character-form');
   if (!form || !editorState) return;
   const current = readEditorCollection(form, collection);
@@ -545,6 +615,9 @@ function addWizardSuggestions(collection, sourceType) {
       verificationStatus: entry.verificationStatus,
       description: entry.description,
       conditions: (entry.prerequisites || []).join(' ; '),
+      prerequisites: entry.prerequisites || [],
+      advancementCost: entry.advancementCost,
+      advancementCostVerified: entry.advancementCostVerified === true,
       effects: entry.effects || [],
       references: entry.sourceInfo?.title ? [`${entry.sourceInfo.title}${entry.sourceInfo.page ? `, p. ${entry.sourceInfo.page}` : ''}`] : []
     }));
@@ -561,13 +634,11 @@ function addWizardSuggestions(collection, sourceType) {
   const renderer = collection === 'skills' ? renderSkillEditorRow : renderTalentEditorRow;
   if (container) {
     container.innerHTML = merged.entries.length
-      ? merged.entries.map(renderer).join('')
+      ? merged.entries.map((entry) => renderer(entry, collection, editorState.character)).join('')
       : '<p class="collection-empty">Aucune entrée. Utilisez le bouton pour en ajouter une.</p>';
     if (collection === 'talents') mountTalentPickers(container, referenceEntries);
   }
-  clearSkippedWizardStep(collection);
   syncEditorStateFromForm(form);
-  updateWizardProgress(form);
   scheduleEditorSave();
   showToast(merged.additions.length
     ? `${merged.additions.length} suggestion(s) ajoutée(s), à confirmer avant acquisition.`
@@ -579,9 +650,7 @@ function generateAndApplyCharacteristics() {
   const speciesField = form?.querySelector('[name="identity.species"]');
   const species = speciesField?.value || '';
   if (!species) {
-    // En création guidée, le champ Espèce appartient à une étape masquée.
-    // Lui donner le focus force le navigateur à faire défiler toute la page.
-    showToast('Choisissez une espèce à l’étape « Espèce » avant de lancer les dés.', 'error');
+    showToast('Choisissez d’abord une espèce dans la section « Espèce » avant de lancer les dés.', 'error');
     return;
   }
 
@@ -604,8 +673,6 @@ function applyCharacteristicGeneration(result) {
     showToast('L’espèce a changé. Relancez les dés pour appliquer les nouvelles valeurs.', 'error');
     return;
   }
-
-  clearSkippedWizardStep('characteristics');
 
   const previousValues = Object.fromEntries(CHARACTERISTICS.map(({ key }) => {
     const value = form.querySelector(`[name="characteristics.${key}"]`)?.value ?? '';
@@ -642,7 +709,6 @@ function applyCharacteristicGeneration(result) {
   syncEditorStateFromForm(form);
   updateCharacteristicPreviews(form);
   updateGenerationHistoryUI();
-  updateWizardProgress(form);
   scheduleEditorSave();
   showToast('Les dix caractéristiques ont été appliquées. Elles restent modifiables.');
 }
@@ -665,7 +731,6 @@ function undoLastCharacteristicGeneration() {
   const history = editorState?.generationHistory;
   const previous = history?.at(-1);
   if (!form || !previous) return;
-  clearSkippedWizardStep('characteristics');
   const changedAfterGeneration = CHARACTERISTICS.some(({ key }) => {
     const current = form.querySelector(`[name="characteristics.${key}"]`)?.value ?? '';
     const generated = previous.generatedValues[key];
@@ -681,7 +746,6 @@ function undoLastCharacteristicGeneration() {
   syncEditorStateFromForm(form);
   updateCharacteristicPreviews(form);
   updateGenerationHistoryUI();
-  updateWizardProgress(form);
   scheduleEditorSave();
   showToast('La dernière génération a été annulée. Les modificateurs de l’espèce actuelle sont conservés.');
 }
@@ -704,45 +768,31 @@ function speciesPreviewMarkup(species) {
   return `<div class="career-preview-content"><p>${escapeHTML(species.description || 'Aucune description disponible.')}</p><div class="species-modifier-grid">${modifiers}</div>${aliases}${traitMarkup}${skillsMarkup}${talentsMarkup}${references}</div>`;
 }
 
-function renderCreationReviewMarkup(character) {
-  const result = validateCharacterCreation(character, referenceEntries);
-  const { identity } = character;
-  const fullName = [identity.firstName, identity.lastName].filter(Boolean).join(' ') || 'Sans nom';
-  const selectedSpecies = result.selected.species?.name || identity.species || 'Non défini';
-  const selectedCareer = result.selected.career?.name || identity.career || 'Non définie';
-  const selectedLevel = result.selected.level?.name || identity.careerLevel || 'Non défini';
-  const calculated = calculateCharacteristics(character);
-  const characteristics = CHARACTERISTICS.map(({ key, shortLabel }) => {
-    const stat = calculated[key];
-    return `<span><strong>${shortLabel}</strong> ${stat.current ?? '—'}</span>`;
+function renderExperienceHistory(character) {
+  const history = [...(character.experience.history || [])].reverse();
+  if (!history.length) return '<p class="empty-inline">Aucun mouvement d’expérience enregistré.</p>';
+  const labels = { gain: 'Gain', purchase: 'Achat', refund: 'Remboursement', undo: 'Annulation', correction: 'Correction', 'career-change': 'Changement de carrière' };
+  const rows = history.map((entry) => {
+    const delta = Number.isFinite(entry.xpBefore) && Number.isFinite(entry.xpAfter)
+      ? entry.xpAfter - entry.xpBefore
+      : (entry.type === 'gain' || (entry.type === 'undo' && ['purchase', 'career-change'].includes(entry.originalOperationType)) || entry.type === 'refund' ? entry.amount : -entry.amount);
+    const balance = Number.isFinite(entry.xpBefore) && Number.isFinite(entry.xpAfter) ? `${entry.xpBefore} → ${entry.xpAfter}` : 'Ancien historique';
+    return `<tr><td>${escapeHTML(formatDate(entry.date, { hour: '2-digit', minute: '2-digit' }))}</td><td>${escapeHTML(labels[entry.type] || 'Opération')}</td><td>${escapeHTML(entry.note || entry.targetPath || '—')}</td><td class="${delta < 0 ? 'xp-negative' : 'xp-positive'}">${delta > 0 ? '+' : ''}${delta} XP</td><td>${escapeHTML(balance)} XP</td></tr>`;
   }).join('');
-  const messages = (items, title, className) => items.length
-    ? `<section class="validation-group ${className}"><h4>${title} · ${items.length}</h4><ul>${items.map((item) => `<li><button type="button" data-action="wizard-go" data-step="${escapeHTML(item.step)}" title="Aller à l’étape concernée">↗</button>${escapeHTML(item.message)}</li>`).join('')}</ul></section>`
-    : '';
-  const status = result.valid
-    ? '<div class="validation-status validation-status-ready"><strong>La fiche peut être créée.</strong><span>Les éventuels avertissements sont non bloquants.</span></div>'
-    : '<div class="validation-status validation-status-blocked"><strong>Quelques informations obligatoires manquent.</strong><span>Utilisez les liens pour revenir directement aux étapes concernées.</span></div>';
-  return `<div class="creation-review-summary">
-    ${status}
-    <div class="creation-review-identity"><div><span>PERSONNAGE</span><strong>${escapeHTML(fullName)}</strong></div><div><span>ESPÈCE</span><strong>${escapeHTML(selectedSpecies)}</strong></div><div><span>CARRIÈRE</span><strong>${escapeHTML(selectedCareer)}</strong></div><div><span>NIVEAU</span><strong>${escapeHTML(selectedLevel)}</strong></div></div>
-    <div class="creation-review-stats"><h4>Caractéristiques actuelles</h4><div>${characteristics}</div></div>
-    <div class="creation-review-counts"><span>${result.counts.skills} compétence(s)</span><span>${result.counts.talents} talent(s)</span><span>${character.equipment.weapons.length + character.equipment.armour.length + character.equipment.possessions.length + character.equipment.spells.length + character.equipment.prayers.length} objet(s) / équipement(s)</span><span>${character.experience.total} XP · ${Math.max(0, character.experience.total - character.experience.spent)} disponibles</span></div>
-    ${messages(result.errors, 'Erreurs bloquantes', 'validation-errors')}
-    ${messages(result.warnings, 'Avertissements', 'validation-warnings')}
-    ${messages(result.information, 'Informations', 'validation-information')}
-  </div>`;
+  return `<div class="responsive-table"><table class="data-table"><thead><tr><th>Date</th><th>Opération</th><th>Détail</th><th>Variation</th><th>Solde avant → après</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-function renderEditor(character, { guided = false } = {}) {
+function renderEditor(character) {
   const { identity, secondary, experience, profile } = character;
   const selectedCareer = findReferenceByLegacyValue(referenceEntries, 'careers', identity.careerId, identity.career);
   const selectedLevel = findCareerLevel(selectedCareer, identity.careerLevelId, identity.careerLevel);
   const selectedSpecies = findSpeciesProfile(identity.species, referenceEntries);
-  const currentStep = CREATION_STEPS.some((step) => step.id === character.creationWizard?.step)
-    ? character.creationWizard.step
-    : 'identity';
-  const stage = (id, title, description, content) => `<section class="form-section creation-stage" data-wizard-step="${id}" ${guided && currentStep !== id ? 'hidden' : ''}><div class="form-section-title"><span>${String(CREATION_STEPS.findIndex((step) => step.id === id) + 1).padStart(2, '0')}</span><div><h3>${title}</h3><p>${description}</p></div></div>${content}</section>`;
-  const progress = guided ? `<nav class="creation-stepper" aria-label="Étapes de création">${CREATION_STEPS.map((step, index) => `<button type="button" class="creation-stepper-item ${currentStep === step.id ? 'is-current' : ''}" data-action="wizard-go" data-step="${step.id}" aria-current="${currentStep === step.id ? 'step' : 'false'}" data-progress="pending"><span>${index + 1}</span><small>${escapeHTML(step.shortTitle)}</small></button>`).join('')}</nav>` : '';
+  const stageLabels = [
+    ['identity', 'Identité'], ['species', 'Espèce'], ['characteristics', 'Caractéristiques'], ['career', 'Carrière'],
+    ['religion', 'Religion'], ['skills', 'Compétences'], ['talents', 'Talents'], ['experience', 'Progression et XP'],
+    ['equipment', 'Équipement'], ['combat', 'Combat'], ['resources', 'Ressources'], ['notes', 'Notes']
+  ];
+  const stage = (id, title, description, content) => `<section class="form-section sheet-section" id="sheet-${id}" data-sheet-section="${id}"><div class="form-section-title"><span>${String(stageLabels.findIndex(([key]) => key === id) + 1).padStart(2, '0')}</span><div><h3>${title}</h3><p>${description}</p></div></div>${content}</section>`;
   const identityContent = `<div class="form-grid">
     ${field('Prénom', 'identity.firstName', identity.firstName, { placeholder: 'Ex. : Alaric' })}
     ${field('Nom', 'identity.lastName', identity.lastName, { placeholder: 'Ex. : von Kessel' })}
@@ -755,14 +805,23 @@ function renderEditor(character, { guided = false } = {}) {
     ${field('Couleur des cheveux', 'identity.hairColor', identity.hairColor)}
   </div>`;
   const speciesContent = `<div class="form-grid">${speciesSelectField(identity.species)}<input type="hidden" name="identity.speciesId" id="species-reference-id" value="${escapeHTML(identity.speciesId || selectedSpecies?.id || '')}"><div class="career-preview form-field-wide" id="species-preview">${speciesPreviewMarkup(selectedSpecies)}</div></div><p class="form-hint">Les modificateurs sont appliqués séparément des jets initiaux. Changer d’espèce met à jour ces bonus sans remplacer les valeurs de base saisies.</p>`;
-  const characteristicContent = `<div class="characteristic-section-heading"><div><p>Valeur initiale, bonus d’espèce, effets de talents, augmentations et valeur actuelle.</p></div><button type="button" class="characteristic-generator-trigger" data-action="generate-characteristics" title="Générer les caractéristiques aléatoirement" aria-label="Générer les caractéristiques aléatoirement"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8" cy="8" r="1.25"/><circle cx="16" cy="8" r="1.25"/><circle cx="8" cy="12" r="1.25"/><circle cx="16" cy="12" r="1.25"/><circle cx="8" cy="16" r="1.25"/><circle cx="16" cy="16" r="1.25"/></svg></button></div><div class="generation-history-bar"><span id="characteristic-generation-history-count">Aucune génération effectuée dans cette session.</span><button type="button" class="button button-quiet button-small" data-action="undo-characteristics-generation" disabled>↶ Annuler la dernière génération</button></div>${characteristicEditorMarkup(character)}<p class="form-hint">Un jet applique deux dés à dix faces (2d10) à chaque caractéristique, puis le modificateur de l’espèce. Les deux dés et le modificateur sont conservés séparément. Vous pouvez annuler la dernière génération. Les coûts d’avancement restent configurables et aucun barème non vérifié n’est appliqué.</p>`;
-  const careerContent = `<div class="form-grid">${renderReferencePicker({ kind: 'careers', entries: referenceEntries, selectedId: identity.careerId, value: identity.career })}${careerLevelField(identity, selectedCareer)}<div class="career-preview form-field-wide" id="career-preview">${careerPreviewMarkup(selectedCareer, selectedLevel)}</div><div class="career-suggestions form-field-wide" id="career-suggestions"><p class="form-hint">Sélectionnez une carrière et un niveau pour afficher les compétences et talents documentés associés.</p></div></div>`;
+  const characteristicContent = `<div class="characteristic-section-heading"><div><p>Valeur initiale, bonus d’espèce, effets de talents, augmentations et valeur actuelle.</p></div><button type="button" class="characteristic-generator-trigger" data-action="generate-characteristics" title="Générer les caractéristiques aléatoirement" aria-label="Générer les caractéristiques aléatoirement"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8" cy="8" r="1.25"/><circle cx="16" cy="8" r="1.25"/><circle cx="8" cy="12" r="1.25"/><circle cx="16" cy="12" r="1.25"/><circle cx="8" cy="16" r="1.25"/><circle cx="16" cy="16" r="1.25"/></svg></button></div><div class="generation-history-bar"><span id="characteristic-generation-history-count">Aucune génération effectuée dans cette session.</span><button type="button" class="button button-quiet button-small" data-action="undo-characteristics-generation" disabled>↶ Annuler la dernière génération</button></div>${characteristicEditorMarkup(character)}<p class="form-hint">Un jet applique deux dés à dix faces (2d10) à chaque caractéristique, puis le modificateur de l’espèce. Les coûts XP sont calculés automatiquement à partir du nombre d’avancements déjà achetés.</p>`;
+  const careerContent = `<div class="form-grid">${renderReferencePicker({ kind: 'careers', entries: referenceEntries, selectedId: identity.careerId, value: identity.career })}${careerLevelField(identity, selectedCareer)}<label class="inline-check form-field-wide"><input type="checkbox" name="identity.careerCompleted" ${identity.careerCompleted ? 'checked' : ''}><span>Carrière actuelle terminée (achèvement et conditions de sortie vérifiés)</span></label><div class="career-preview form-field-wide" id="career-preview">${careerPreviewMarkup(selectedCareer, selectedLevel)}</div><div class="career-suggestions form-field-wide" id="career-suggestions"><p class="form-hint">Sélectionnez une carrière et un niveau pour afficher les compétences et talents documentés associés.</p></div></div>`;
   const religionContent = `<div class="form-grid">${renderReferencePicker({ kind: 'religions', entries: referenceEntries, selectedId: identity.religionId, value: identity.religion })}${renderReferencePicker({ kind: 'deities', entries: referenceEntries, selectedId: identity.deityId, value: identity.deity })}</div><p class="form-hint">Cette étape est facultative. La divinité est filtrée selon le culte sélectionné ; les liens existants sont vérifiés avant validation.</p>`;
-  const skillsContent = `<div id="skill-suggestions" class="suggestion-panel"><p class="form-hint">Les compétences des référentiels peuvent être proposées ici. Les ajouter les sélectionne sans les déclarer acquises ni leur attribuer d’avancement.</p><button type="button" class="button button-outline button-small" data-action="add-career-skills">＋ Ajouter les compétences de carrière</button><button type="button" class="button button-quiet button-small" data-action="add-species-skills">＋ Ajouter les compétences d’espèce</button></div>${renderCollectionSection('Compétences', 'skills', character.skills || [], renderSkillEditorRow, 'Une compétence sélectionnée n’est acquise qu’après validation explicite. Les avancements restent à zéro tant que vous ne les renseignez pas.')}`;
-  const talentsContent = `<div id="talent-suggestions" class="suggestion-panel"><p class="form-hint">Les talents associés sont proposés séparément selon leur provenance. Examinez leurs conditions puis ajoutez-les explicitement ; aucun talent n’est acquis automatiquement.</p><div class="talent-suggestion-group"><strong data-talent-career-count>Carrière / niveau</strong><ul data-talent-career-list></ul><button type="button" class="button button-outline button-small" data-action="add-career-talents">＋ Ajouter les talents de carrière</button></div><div class="talent-suggestion-group"><strong data-talent-species-count>Espèce</strong><ul data-talent-species-list></ul><button type="button" class="button button-quiet button-small" data-action="add-species-talents">＋ Ajouter les talents d’espèce</button></div></div>${renderCollectionSection('Talents', 'talents', character.talents || [], renderTalentEditorRow, 'Un seul enregistrement par talent : augmentez le rang sur la ligne existante. Les coûts et effets non vérifiés ne sont pas appliqués.')}`;
-  const resourcesContent = `<div class="form-grid form-grid-stats">
-      ${field('Expérience totale', 'experience.total', experience.total, { type: 'number', min: 0 })}
-      ${field('Expérience dépensée', 'experience.spent', experience.spent, { type: 'number', min: 0 })}
+  const skillsContent = `<div id="skill-suggestions" class="suggestion-panel"><p class="form-hint">Les compétences des référentiels peuvent être proposées ici. Les ajouter les sélectionne sans les déclarer acquises ni leur attribuer d’avancement.</p><button type="button" class="button button-outline button-small" data-action="add-career-skills">＋ Ajouter les compétences de carrière</button><button type="button" class="button button-quiet button-small" data-action="add-species-skills">＋ Ajouter les compétences d’espèce</button></div>${renderCollectionSection('Compétences', 'skills', character.skills || [], renderSkillEditorRow, 'Achetez les avancements directement sur chaque ligne. Les coûts suivent le moteur de progression configuré.', character)}`;
+  const talentsContent = `<div id="talent-suggestions" class="suggestion-panel"><p class="form-hint">Les talents associés sont proposés séparément selon leur provenance. Examinez leurs conditions puis ajoutez-les explicitement ; aucun talent n’est acquis automatiquement.</p><div class="talent-suggestion-group"><strong data-talent-career-count>Carrière / niveau</strong><ul data-talent-career-list></ul><button type="button" class="button button-outline button-small" data-action="add-career-talents">＋ Ajouter les talents de carrière</button></div><div class="talent-suggestion-group"><strong data-talent-species-count>Espèce</strong><ul data-talent-species-list></ul><button type="button" class="button button-quiet button-small" data-action="add-species-talents">＋ Ajouter les talents d’espèce</button></div></div>${renderCollectionSection('Talents', 'talents', character.talents || [], renderTalentEditorRow, 'Achetez l’acquisition ou le rang suivant directement sur la ligne du talent.', character)}`;
+  const experienceAvailable = getExperienceAvailable(character);
+  const reversedHistoryIds = new Set((experience.history || []).filter((entry) => entry.type === 'undo').map((entry) => entry.reversedEntryId));
+  const canUndoPurchase = (experience.history || []).some((entry) => ['gain', 'purchase', 'refund', 'correction', 'career-change'].includes(entry.type) && !reversedHistoryIds.has(entry.id));
+  const experienceContent = `<div class="detail-summary-grid"><article class="detail-summary"><span>Expérience totale</span><strong>${experience.total.toLocaleString('fr-FR')} <small>XP</small></strong></article><article class="detail-summary"><span>Expérience dépensée</span><strong>${experience.spent.toLocaleString('fr-FR')} <small>XP</small></strong></article><article class="detail-summary detail-summary-highlight"><span>Expérience disponible</span><strong class="${experienceAvailable < 0 ? 'xp-negative' : ''}">${experienceAvailable.toLocaleString('fr-FR')} <small>XP</small></strong></article></div><div class="experience-actions"><div class="experience-gain-control"><label class="xp-action-field"><span>Gain d’expérience (XP)</span><input type="number" min="1" max="1000000000" step="1" value="50" data-ephemeral data-xp-gain-amount></label><label class="xp-action-field"><span>Motif (facultatif)</span><input type="text" maxlength="500" value="Gain d’expérience" data-ephemeral data-xp-gain-note></label><button class="button button-outline" type="button" data-action="grant-experience" data-character-id="${escapeHTML(character.id)}">＋ Ajouter le gain</button></div><details class="experience-correction"><summary>Corriger le solde d’expérience</summary><div class="experience-correction-fields"><label class="xp-action-field"><span>Expérience totale</span><input type="number" min="0" max="1000000000" step="1" value="${experience.total}" data-ephemeral data-xp-correction-total></label><label class="xp-action-field"><span>Expérience dépensée</span><input type="number" min="0" max="1000000000" step="1" value="${experience.spent}" data-ephemeral data-xp-correction-spent></label><label class="xp-action-field"><span>Motif</span><input type="text" maxlength="500" value="Correction manuelle vérifiée" data-ephemeral data-xp-correction-note></label><button class="button button-quiet" type="button" data-action="correct-experience" data-character-id="${escapeHTML(character.id)}">Enregistrer la correction</button></div></details>${canUndoPurchase ? `<button class="button button-quiet" type="button" data-action="undo-last-purchase" data-character-id="${escapeHTML(character.id)}">↶ Annuler la dernière opération</button>` : ''}</div>${renderExperienceHistory(character)}`;
+  const equipmentContent = `<div class="editor-collection-group">
+      ${renderCollectionSection('Armes', 'weapons', character.equipment?.weapons || [], renderEquipmentEditorRow)}
+      ${renderCollectionSection('Armures', 'armour', character.equipment?.armour || [], renderEquipmentEditorRow)}
+      ${renderCollectionSection('Objets et possessions', 'possessions', character.equipment?.possessions || [], renderEquipmentEditorRow)}
+      ${renderCollectionSection('Sorts', 'spells', character.equipment?.spells || [], renderEquipmentEditorRow)}
+      ${renderCollectionSection('Prières', 'prayers', character.equipment?.prayers || [], renderEquipmentEditorRow)}
+    </div>`;
+  const combatContent = `<div class="form-grid form-grid-stats">
       ${field('Mouvement', 'secondary.movement', secondary.movement, { type: 'number', min: 0 })}
       ${field('Blessures actuelles', 'secondary.woundsCurrent', secondary.woundsCurrent, { type: 'number', min: 0 })}
       ${field('Blessures maximales', 'secondary.woundsMax', secondary.woundsMax, { type: 'number', min: 0 })}
@@ -773,45 +832,47 @@ function renderEditor(character, { guided = false } = {}) {
       ${field('Points de chance', 'secondary.fortune', secondary.fortune, { type: 'number', min: 0 })}
       ${field('Résilience', 'secondary.resilience', secondary.resilience, { type: 'number', min: 0 })}
       ${field('Motivation', 'secondary.resolve', secondary.resolve, { type: 'number', min: 0 })}
+    </div><p class="form-hint">Les valeurs dérivées restent calculées automatiquement. Les champs secondaires sans formule vérifiée sont modifiables ici.</p>`;
+  const resourcesContent = `<div class="form-grid form-grid-stats">
       ${field('Points de corruption', 'resources.corruptionPoints', character.resources?.corruptionPoints ?? 0, { type: 'number', min: 0 })}
       ${field('Seuil de corruption', 'rules.corruptionThreshold', character.rules?.corruptionThreshold, { type: 'number', min: 0 })}
       ${field('Capacité d’encombrement', 'rules.encumbranceCapacity', character.rules?.encumbranceCapacity, { type: 'number', min: 0, step: 'any' })}
       ${selectField('Statut', 'identity.status', identity.status, ['Actif', 'En pause', 'Inactif'])}
-    </div>
-    <div class="editor-collection-group"><h4>Équipement et possessions · facultatif</h4>
-      ${renderCollectionSection('Armes', 'weapons', character.equipment?.weapons || [], renderEquipmentEditorRow)}
-      ${renderCollectionSection('Armures', 'armour', character.equipment?.armour || [], renderEquipmentEditorRow)}
-      ${renderCollectionSection('Objets et possessions', 'possessions', character.equipment?.possessions || [], renderEquipmentEditorRow)}
-      ${renderCollectionSection('Sorts', 'spells', character.equipment?.spells || [], renderEquipmentEditorRow)}
-      ${renderCollectionSection('Prières', 'prayers', character.equipment?.prayers || [], renderEquipmentEditorRow)}
-    </div>
-    <div class="form-grid">${textareaField('Description physique', 'profile.description', profile.description, 'Apparence, signes distinctifs…')}${textareaField('Histoire personnelle', 'profile.history', profile.history, 'Origines, événements marquants…')}${textareaField('Objectifs', 'profile.goals', profile.goals, 'Ce que votre personnage cherche à accomplir…')}${textareaField('Notes personnelles', 'profile.notes', profile.notes, 'Informations libres…')}</div>
-    <p class="form-hint">Le mouvement, les blessures maximales et plusieurs ressources restent manuels tant que les données officielles nécessaires ne sont pas configurées. Les bonus de Force et d’Endurance sont dérivables des caractéristiques quand elles sont renseignées.</p>`;
+    </div><p class="form-hint">Les ressources dont aucune formule vérifiée n’est configurée restent saisissables manuellement.</p>`;
+  const notesContent = `<div class="form-grid">${textareaField('Description physique', 'profile.description', profile.description, 'Apparence, signes distinctifs…')}${textareaField('Histoire personnelle', 'profile.history', profile.history, 'Origines, événements marquants…')}${textareaField('Objectifs', 'profile.goals', profile.goals, 'Ce que votre personnage cherche à accomplir…')}${textareaField('Notes personnelles', 'profile.notes', profile.notes, 'Informations libres…')}</div>`;
+  const careerChangeOptions = referenceEntries
+    .filter((entry) => entry.kind === 'careers' && (identity.careerId ? entry.id !== identity.careerId : entry.name !== identity.career))
+    .sort((left, right) => left.name.localeCompare(right.name, 'fr'))
+    .map((entry) => `<option value="${escapeHTML(entry.id)}">${escapeHTML(entry.name)}</option>`).join('');
+  const careerChangeAction = `<div class="career-change-action form-field-wide"><p>Après achèvement et vérification des conditions de sortie, choisissez une nouvelle carrière. Coût : ${CAREER_CHANGE_COST} XP.</p><label class="xp-action-field"><span>Nouvelle carrière</span><select data-ephemeral data-career-change-career><option value="">Choisir une carrière…</option>${careerChangeOptions}</select></label><label class="xp-action-field"><span>Niveau de départ</span><select data-ephemeral data-career-change-level data-career-id=""><option value="">Choisissez d’abord une carrière</option></select></label><button class="button button-outline" type="button" data-action="change-career" data-character-id="${escapeHTML(character.id)}" disabled>Changer de carrière · ${CAREER_CHANGE_COST} XP</button></div>`;
   const stages = [
-    stage('identity', 'Identité du personnage', 'Les traits qui définissent votre personnage.', identityContent),
+    stage('identity', 'Identité', 'Renseignez les informations personnelles dans l’ordre qui vous convient.', identityContent),
     stage('species', 'Espèce', 'Choisissez une espèce et consultez les données configurées.', speciesContent),
     stage('characteristics', 'Caractéristiques principales', 'Générez les caractéristiques ou saisissez-les individuellement.', characteristicContent),
-    stage('career', 'Carrière et niveau', 'Les choix proposés proviennent uniquement du référentiel sélectionné.', careerContent),
+    stage('career', 'Carrière et niveau', 'Choisissez ou ajustez directement la carrière et son niveau.', `${careerContent}${careerChangeAction}`),
     stage('religion', 'Religion et divinité', 'Une étape facultative, reliée aux données de votre catalogue.', religionContent),
-    stage('skills', 'Compétences', 'Examinez les suggestions et décidez lesquelles sélectionner.', skillsContent),
-    stage('talents', 'Talents', 'Ajoutez les talents voulus sans inventer leurs effets ni leurs coûts.', talentsContent),
-    stage('resources', 'Caractéristiques secondaires et ressources', 'Renseignez les valeurs connues et les éléments facultatifs.', resourcesContent),
-    stage('review', 'Récapitulatif et validation', 'Les erreurs bloquantes et les avertissements vous renvoient à la bonne étape.', '<div id="creation-review">Le récapitulatif sera actualisé à cette étape.</div>')
+    stage('skills', 'Compétences', 'Ajoutez les compétences et achetez leurs avancements sur chaque ligne.', skillsContent),
+    stage('talents', 'Talents', 'Ajoutez les talents et gérez leur acquisition et leurs rangs sur la même ligne.', talentsContent),
+    stage('experience', 'Progression et expérience', 'Suivez les gains, achats, remboursements et le solde disponible.', experienceContent),
+    stage('equipment', 'Équipement, magie et prières', 'Gérez armes, armures, possessions, sorts et prières depuis leurs sections.', equipmentContent),
+    stage('combat', 'Combat', 'Modifiez blessures, mouvement et autres valeurs secondaires.', combatContent),
+    stage('resources', 'Ressources', 'Suivez corruption, encombrement et statut du personnage.', resourcesContent),
+    stage('notes', 'Notes et chronique', 'Ajoutez librement description, histoire, objectifs et notes.', notesContent)
   ].join('');
-  const footer = guided
-    ? `<footer class="editor-footer creation-wizard-footer"><span class="autosave-state" id="autosave-state"><i></i> Brouillon enregistré sur cet appareil</span><div><button type="button" class="button button-quiet" data-action="close-editor">Enregistrer le brouillon</button><button type="button" class="button button-outline" data-action="wizard-prev">← Précédent</button><button type="button" class="button button-quiet" data-action="wizard-skip" hidden>Passer cette étape</button><button type="button" class="button button-primary" data-action="wizard-next">Suivant →</button><button type="submit" class="button button-primary" data-wizard-finish hidden>Créer le personnage</button></div></footer>`
-    : `<footer class="editor-footer"><span class="autosave-state" id="autosave-state"><i></i> Enregistré sur cet appareil</span><div><button type="button" class="button button-quiet" data-action="close-editor">Fermer</button><button type="submit" class="button button-primary">Enregistrer et terminer <span aria-hidden="true">→</span></button></div></footer>`;
+  const sectionNav = `<nav class="sheet-nav" aria-label="Sections de la fiche">${[
+    ['identity', 'Identité'], ['species', 'Espèce'], ['characteristics', 'Caractéristiques'], ['career', 'Carrière'], ['religion', 'Religion'],
+    ['skills', 'Compétences'], ['talents', 'Talents'], ['experience', 'Progression et XP'], ['equipment', 'Équipement'], ['combat', 'Combat'], ['resources', 'Ressources'], ['notes', 'Notes']
+  ].map(([id, label]) => `<button type="button" data-action="scroll-section" data-target="sheet-${id}">${label}</button>`).join('')}</nav>`;
+  const footer = `<footer class="editor-footer sheet-footer"><span class="autosave-state" id="autosave-state" role="status" aria-live="polite"><i></i> Enregistré</span><div><button type="button" class="button button-quiet" data-action="duplicate-character" data-id="${escapeHTML(character.id)}">Dupliquer</button><button type="button" class="button button-quiet" data-action="delete-character" data-id="${escapeHTML(character.id)}">Supprimer</button></div></footer>`;
   return `
-    <dialog class="editor-dialog ${guided ? 'creation-wizard-dialog' : ''}" id="character-dialog" aria-labelledby="editor-title">
-      <div class="editor-shell">
-        <header class="editor-header"><div><div class="eyebrow"><span class="eyebrow-line"></span> REGISTRE PERSONNEL</div><h2 id="editor-title">${guided ? 'Création guidée du personnage' : 'Modifier le personnage'}</h2><p>${guided ? 'Avancez à votre rythme. Vos choix sont conservés dans un brouillon local.' : 'Les modifications sont enregistrées automatiquement sur cet appareil.'}</p></div><button type="button" class="dialog-close" data-action="close-editor" aria-label="Fermer">×</button></header>
-        ${progress}
-        <form id="character-form" class="character-form" data-guided="${guided ? 'true' : 'false'}">
-          ${stages}
-          ${footer}
-        </form>
-      </div>
-    </dialog>`;
+    <div class="detail-page character-sheet">
+      <header class="character-sheet-heading">
+        <div><a class="back-link" href="#/">← Retour au registre</a><div class="eyebrow"><span class="eyebrow-line"></span> FICHE PERSONNAGE UNIQUE</div><h1>${escapeHTML(getCharacterName(character))}</h1><p>Toutes les informations sont modifiables directement sur cette fiche.</p></div>
+        <div class="hero-actions"><button class="button button-outline" type="button" data-action="export-character" data-id="${escapeHTML(character.id)}">⇩ Exporter</button></div>
+      </header>
+      ${sectionNav}
+      <form id="character-form" class="character-form character-sheet-form" novalidate>${stages}${footer}</form>
+    </div>`;
 }
 
 function setNestedValue(target, path, value) {
@@ -833,6 +894,7 @@ function collectEditorValues() {
     const value = control?.type === 'number' ? (rawValue === '' ? null : Number(rawValue)) : rawValue;
     setNestedValue(candidate, name, value);
   }
+  candidate.identity.careerCompleted = Boolean(form.querySelector('[name="identity.careerCompleted"]')?.checked);
   candidate.skills = readEditorCollection(form, 'skills');
   candidate.talents = readEditorCollection(form, 'talents');
   candidate.equipment = {
@@ -884,10 +946,12 @@ function queueEditorSave(complete = false) {
 }
 
 function scheduleEditorSave() {
-  updateAutosaveState('Enregistrement des modifications…', 'pending');
-  setSaveIndicator('Modifications en attente…', 'pending');
+  updateAutosaveState('Modifications en cours…', 'dirty');
+  setSaveIndicator('Modifications en cours…', 'pending');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    updateAutosaveState('Enregistrement…', 'saving');
+    setSaveIndicator('Enregistrement…', 'saving');
     queueEditorSave().catch((error) => {
       updateAutosaveState('Échec de la sauvegarde', 'error');
       setSaveIndicator('Erreur de sauvegarde', 'error');
@@ -896,166 +960,10 @@ function scheduleEditorSave() {
   }, 450);
 }
 
-async function closeEditor() {
-  if (!editorState) return;
-  clearTimeout(saveTimer);
-  try {
-    await queueEditorSave();
-    const dialog = document.querySelector('#character-dialog');
-    if (dialog?.open) dialog.close();
-    modalRoot.replaceChildren();
-    editorState = null;
-    await refreshCharacters();
-  } catch (error) {
-    showToast(error.message || 'La sauvegarde a échoué.', 'error');
-  }
-}
-
-function showWizardStep(stepId) {
-  const index = Math.max(0, CREATION_STEPS.findIndex((step) => step.id === stepId));
-  const selected = CREATION_STEPS[index];
-  const form = document.querySelector('#character-form');
-  if (!form || !selected) return;
-  form.querySelectorAll('[data-wizard-step]').forEach((section) => {
-    section.hidden = section.dataset.wizardStep !== selected.id;
-  });
-  form.closest('.editor-shell')?.querySelectorAll('.creation-stepper-item').forEach((button, buttonIndex) => {
-    const active = button.dataset.step === selected.id;
-    button.classList.toggle('is-current', active);
-    button.setAttribute('aria-current', active ? 'step' : 'false');
-    button.querySelector('span').textContent = buttonIndex + 1;
-  });
-  updateWizardProgress(form);
-  const previous = form.querySelector('[data-action="wizard-prev"]');
-  const next = form.querySelector('[data-action="wizard-next"]');
-  const skip = form.querySelector('[data-action="wizard-skip"]');
-  const finish = form.querySelector('[data-wizard-finish]');
-  if (previous) previous.disabled = index === 0;
-  if (next) next.hidden = selected.id === 'review';
-  if (skip) skip.hidden = !OPTIONAL_CREATION_STEPS.has(selected.id);
-  if (finish) finish.hidden = selected.id !== 'review';
-  const title = document.querySelector('#editor-title');
-  if (title) title.textContent = `Création guidée · ${selected.title}`;
-  if (selected.id === 'review') updateCreationReview();
-}
-
-function updateWizardProgress(form = document.querySelector('#character-form')) {
-  if (!editorState?.guided || !form) return;
-  const candidate = collectEditorValues();
-  const states = getCreationStepStates(
-    candidate,
-    referenceEntries,
-    {
-      currentStep: editorState.character.creationWizard?.step || 'identity',
-      skippedSteps: candidate.creationWizard?.skippedSteps || []
-    }
-  );
-  const statesById = new Map(states.map((state) => [state.id, state]));
-  form.closest('.editor-shell')?.querySelectorAll('.creation-stepper-item').forEach((button) => {
-    const state = statesById.get(button.dataset.step);
-    if (!state) return;
-    button.classList.toggle('is-current', state.isCurrent);
-    button.classList.toggle('is-complete', state.isComplete);
-    button.dataset.progress = state.state;
-    const index = CREATION_STEPS.findIndex((step) => step.id === state.id);
-    const marker = button.querySelector('span');
-    if (marker) marker.textContent = state.isComplete ? '✓' : String(index + 1);
-    const label = button.querySelector('small')?.textContent || button.dataset.step;
-    button.setAttribute('aria-label', `${label}${state.isComplete ? ' · étape terminée' : ' · étape à compléter'}${state.isCurrent ? ' · étape sélectionnée' : ''}`);
-  });
-}
-
-function clearSkippedWizardStep(stepId) {
-  if (!editorState?.guided || !OPTIONAL_CREATION_STEPS.has(stepId)) return false;
-  const wizard = editorState.character.creationWizard || { step: 'identity', skippedSteps: [] };
-  const skipped = new Set(wizard.skippedSteps || []);
-  if (!skipped.delete(stepId)) return false;
-  editorState.character.creationWizard = { ...wizard, skippedSteps: [...skipped] };
-  return true;
-}
-
-function clearSkippedWizardStepForTarget(target) {
-  if (!target?.name && !target?.hasAttribute?.('data-collection-field')) return;
-  const stepId = target.closest?.('[data-wizard-step]')?.dataset.wizardStep;
-  if (stepId) clearSkippedWizardStep(stepId);
-}
-
-function updateCreationReview() {
-  const container = document.querySelector('#creation-review');
-  if (!container || !editorState) return;
-  try {
-    const candidate = collectEditorValues();
-    const validation = validateCharacterCreation(candidate, referenceEntries);
-    container.innerHTML = renderCreationReviewMarkup(candidate);
-    const finish = document.querySelector('[data-wizard-finish]');
-    if (finish) {
-      finish.disabled = !validation.valid;
-      finish.title = validation.valid ? 'Créer la fiche du personnage' : 'Corrigez les erreurs bloquantes avant de créer la fiche';
-    }
-  } catch (error) {
-    container.textContent = error.message || 'Impossible de préparer le récapitulatif.';
-  }
-}
-
-async function setWizardStep(stepId, { skipCurrent = false } = {}) {
-  if (!editorState?.guided || !CREATION_STEPS.some((step) => step.id === stepId)) return;
-  clearTimeout(saveTimer);
-  const state = editorState;
-  const previousCharacter = state.character;
-  try {
-    const candidate = collectEditorValues();
-    const currentStep = state.character.creationWizard?.step || 'identity';
-    const skipped = new Set(candidate.creationWizard?.skippedSteps || []);
-    if (skipCurrent && currentStep !== stepId && OPTIONAL_CREATION_STEPS.has(currentStep)) skipped.add(currentStep);
-    candidate.creationWizard = { step: stepId, skippedSteps: [...skipped] };
-    candidate.isDraft = true;
-    // Le changement est visible immédiatement. Toutes les écritures restent
-    // sérialisées avec les autosauvegardes pour empêcher un ancien brouillon
-    // d'écraser l'étape ou les choix les plus récents.
-    state.character = candidate;
-    showWizardStep(stepId);
-    updateSidebar();
-    await enqueueEditorSave(async () => {
-      if (editorState !== state) return;
-      const persisted = collectEditorValues();
-      persisted.isDraft = true;
-      await saveCharacter(persisted);
-      if (editorState !== state) return;
-      const index = characters.findIndex((entry) => entry.id === persisted.id);
-      if (index >= 0) characters[index] = persisted;
-      else characters.push(persisted);
-      showWizardStep(state.character.creationWizard?.step || 'identity');
-      updateAutosaveState('Brouillon enregistré', 'saved');
-      setSaveIndicator('Brouillon enregistré', 'saved');
-      updateSidebar();
-    });
-  } catch (error) {
-    if (editorState === state) {
-      state.character = { ...state.character, creationWizard: previousCharacter.creationWizard };
-      showWizardStep(previousCharacter.creationWizard?.step || 'identity');
-      updateSidebar();
-    }
-    updateAutosaveState('Échec de la sauvegarde', 'error');
-    showToast(error.message || 'Impossible d’enregistrer le brouillon.', 'error');
-  }
-}
-
-async function openEditor(character, { guided = false } = {}) {
-  editorState = { character: clone(character), guided, generationHistory: [] };
-  const activeEditorState = editorState;
-  modalRoot.innerHTML = renderEditor(character, { guided });
-  const dialog = document.querySelector('#character-dialog');
-  dialog.addEventListener('close', () => {
-    if (editorState === activeEditorState) {
-      editorState = null;
-      if (modalRoot.contains(dialog)) modalRoot.replaceChildren();
-    }
-    refreshCharacters().catch((error) => showToast(error.message, 'error'));
-  }, { once: true });
-  dialog.addEventListener('cancel', (event) => {
-    event.preventDefault();
-    closeEditor();
-  });
+async function openEditor(character) {
+  // La fiche est l'écran de travail permanent : aucune modale ni mode édition.
+  editorState = { character: clone(character), originalCareerIdentity: clone(character.identity), generationHistory: [] };
+  viewRoot.innerHTML = renderEditor(character);
   const form = document.querySelector('#character-form');
   let pickers;
   pickers = mountReferencePickers(form, referenceEntries, {
@@ -1076,11 +984,20 @@ async function openEditor(character, { guided = false } = {}) {
         pickers.refresh();
       }
       if (kind === 'careers') {
-        const oldCareerId = previous?.id || '';
-        if (oldCareerId && entry?.id !== oldCareerId) {
-          const linkedRows = [...form.querySelectorAll('[data-item-row][data-source-career-id]')]
-            .filter((row) => row.dataset.sourceCareerId === oldCareerId);
-          if (linkedRows.length && !window.confirm(`La nouvelle carrière ne correspond plus à ${linkedRows.length} compétence(s) ou talent(s) suggéré(s) par « ${previous.name} ».\n\nLes retirer de cette sélection ?`)) return false;
+        const oldCareerId = previous?.id || editorState?.originalCareerIdentity?.careerId || '';
+        const previousCareerName = previous?.name || editorState?.originalCareerIdentity?.career || '';
+        const changedCareer = oldCareerId
+          ? entry?.id !== oldCareerId
+          : Boolean(previousCareerName && entry?.name !== previousCareerName);
+        if (changedCareer) {
+          const linkedRows = oldCareerId
+            ? [...form.querySelectorAll('[data-item-row][data-source-career-id]')]
+              .filter((row) => row.dataset.sourceCareerId === oldCareerId)
+            : [];
+          const oldCareerLabel = previous?.name || previousCareerName || 'l’ancienne carrière';
+          if (linkedRows.length && !window.confirm(`La nouvelle carrière ne correspond plus à ${linkedRows.length} compétence(s) ou talent(s) suggéré(s) par « ${oldCareerLabel} ».\n\nLes retirer de cette sélection ?`)) return false;
+          const completionCheckbox = form.querySelector('[name="identity.careerCompleted"]');
+          if (completionCheckbox) completionCheckbox.checked = false;
           linkedRows.forEach((row) => row.remove());
           for (const collection of ['skills', 'talents']) {
             const container = form.querySelector(`#collection-${collection}`);
@@ -1094,11 +1011,11 @@ async function openEditor(character, { guided = false } = {}) {
   });
   mountTalentPickers(form, referenceEntries);
   form.addEventListener('input', (event) => {
-    clearSkippedWizardStepForTarget(event.target);
+    if (event.target.matches('[data-ephemeral]')) return;
     syncEditorStateFromForm(form);
+    const heading = document.querySelector('.character-sheet-heading h1');
+    if (heading) heading.textContent = getCharacterName(editorState.character);
     if (event.target.closest('[data-item-row]') || event.target.matches('[data-stat-initial], [data-stat-advances]')) updateCharacteristicPreviews(form);
-    if (guided) updateWizardProgress(form);
-    if (guided && editorState?.character.creationWizard?.step === 'review') updateCreationReview();
     scheduleEditorSave();
   });
   form.addEventListener('click', (event) => {
@@ -1106,17 +1023,15 @@ async function openEditor(character, { guided = false } = {}) {
     if (!button) return;
     const action = button.dataset.collectionAction;
     const collection = button.dataset.collection || button.closest('[data-item-row]')?.dataset.collection;
-    const progressStep = button.closest('[data-wizard-step]')?.dataset.wizardStep || collection;
     if (action === 'remove') {
       button.closest('[data-item-row]')?.remove();
-      clearSkippedWizardStep(progressStep);
     } else if (action === 'add' && collection) {
       const container = form.querySelector(`#collection-${collection}`);
       if (!container) return;
       container.querySelector('.collection-empty')?.remove();
       const templates = {
-        skills: () => renderSkillEditorRow({ id: createId(), useCharacteristicBase: true, advances: 0, acquired: true, status: 'acquired' }),
-        talents: () => renderTalentEditorRow({ id: createId(), rank: 1, acquired: true, status: 'acquired' }),
+        skills: () => renderSkillEditorRow({ id: createId(), useCharacteristicBase: true, advances: 0, acquired: true, status: 'acquired' }, 'skills', editorState.character),
+        talents: () => renderTalentEditorRow({ id: createId(), rank: 1, acquired: false, status: 'selected' }, 'talents', editorState.character),
         weapons: () => renderEquipmentEditorRow({ id: createId(), quantity: 1 }, 'weapons'),
         armour: () => renderEquipmentEditorRow({ id: createId(), quantity: 1 }, 'armour'),
         possessions: () => renderEquipmentEditorRow({ id: createId(), quantity: 1 }, 'possessions'),
@@ -1126,16 +1041,18 @@ async function openEditor(character, { guided = false } = {}) {
       if (!templates[collection]) return;
       container.insertAdjacentHTML('beforeend', templates[collection]());
       if (collection === 'talents') mountTalentPickers(container, referenceEntries);
-      clearSkippedWizardStep(progressStep);
       container.querySelector('[data-item-row]:last-child [data-collection-field="name"]')?.focus();
     }
     syncEditorStateFromForm(form);
     updateCharacteristicPreviews(form);
-    if (guided) updateWizardProgress(form);
     scheduleEditorSave();
   });
   form.addEventListener('change', (event) => {
-    clearSkippedWizardStepForTarget(event.target);
+    if (event.target.matches('[data-ephemeral]')) {
+      updateInlineProgressionControls(form);
+      return;
+    }
+    updateInlineProgressionControls(form);
     if (event.target.name === 'identity.species') {
       updateSpeciesSelection(form);
     }
@@ -1147,55 +1064,27 @@ async function openEditor(character, { guided = false } = {}) {
       document.querySelector('#career-level-value').value = level?.name || '';
       const preview = document.querySelector('#career-preview');
       if (preview) preview.innerHTML = careerPreviewMarkup(career, level);
-      refreshWizardSuggestions();
+      refreshReferenceSuggestions();
     }
     syncEditorStateFromForm(form);
     updateCharacteristicPreviews(form);
-    if (guided) updateWizardProgress(form);
-    if (guided && editorState?.character.creationWizard?.step === 'review') updateCreationReview();
     scheduleEditorSave();
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     clearTimeout(saveTimer);
     try {
-      if (guided) {
-        const currentStep = editorState.character.creationWizard?.step || 'identity';
-        if (currentStep !== 'review') {
-          const nextStep = CREATION_STEPS[Math.min(CREATION_STEPS.length - 1, CREATION_STEPS.findIndex((step) => step.id === currentStep) + 1)];
-          await setWizardStep(nextStep.id);
-          return;
-        }
-        const candidate = collectEditorValues();
-        const validation = validateCharacterCreation(candidate, referenceEntries);
-        updateCreationReview();
-        if (!validation.valid) {
-          const firstError = validation.errors[0];
-          await setWizardStep(firstError.step);
-          showToast(validation.errors.map((item) => item.message).join(' '), 'error');
-          return;
-        }
-      }
-      await queueEditorSave(true);
-      const id = editorState.character.id;
-      if (dialog.open) dialog.close('saved');
-      navigate(`/character/${encodeURIComponent(id)}`);
-      showToast(guided ? 'Personnage créé et enregistré sur cet appareil.' : 'Personnage enregistré.');
+      await queueEditorSave();
+      showToast('Fiche enregistrée automatiquement.');
     } catch (error) {
       updateAutosaveState('Échec de la sauvegarde', 'error');
       showToast(error.message || 'Impossible d’enregistrer cette fiche.', 'error');
     }
   });
-  dialog.showModal();
   updateSidebar();
   updateCharacteristicPreviews(form);
-  if (guided) {
-    showWizardStep(character.creationWizard?.step || 'identity');
-    refreshWizardSuggestions();
-    dialog.querySelector(`[data-wizard-step="${character.creationWizard?.step || 'identity'}"] input:not([type="hidden"]), [data-wizard-step="${character.creationWizard?.step || 'identity'}"] select`)?.focus();
-  } else {
-    dialog.querySelector('.reference-picker-input')?.focus();
-  }
+  updateInlineProgressionControls(form);
+  refreshReferenceSuggestions();
 }
 
 function updateCareerLevelOptions(career, previousCareer) {
@@ -1226,29 +1115,25 @@ function updateCareerLevelOptions(career, previousCareer) {
   const preview = document.querySelector('#career-preview');
   if (preview) preview.innerHTML = careerPreviewMarkup(career, selected || null);
   hidden.dispatchEvent(new Event('change', { bubbles: true }));
-  refreshWizardSuggestions();
+  refreshReferenceSuggestions();
 }
 
 async function createNewCharacter() {
   try {
-    const character = createCharacter({ isDraft: true, creationWizard: { step: 'identity', skippedSteps: [] } });
+    const character = createCharacter({ isDraft: false, creationWizard: null });
     await saveCharacter(character);
     characters.push(character);
-    await openEditor(character, { guided: true });
-    setSaveIndicator('Brouillon créé', 'saved');
+    setSaveIndicator('Fiche vierge créée', 'saved');
+    navigate(`/character/${encodeURIComponent(character.id)}`);
   } catch (error) {
     showToast(error.message || 'Impossible de créer une fiche.', 'error');
   }
 }
 
-async function editCharacter(id) {
-  try {
-    const character = await getCharacter(id);
-    if (!character) throw new Error('Ce personnage est introuvable.');
-    await openEditor(character, { guided: character.isDraft });
-  } catch (error) {
-    showToast(error.message || 'Impossible d’ouvrir cette fiche.', 'error');
-  }
+function openCharacterSheet(id) {
+  const character = characters.find((item) => item.id === id);
+  if (!character) return showToast('Ce personnage est introuvable.', 'error');
+  navigate(`/character/${encodeURIComponent(id)}`);
 }
 
 async function removeCharacter(id) {
@@ -1256,8 +1141,17 @@ async function removeCharacter(id) {
   if (!character) return;
   if (!window.confirm(`Supprimer définitivement « ${getCharacterName(character)} » de ce navigateur ?`)) return;
   try {
+    if (editorState?.character.id === id) {
+      clearTimeout(saveTimer);
+      await queueEditorSave();
+    }
     await deleteCharacter(id);
     characters = characters.filter((item) => item.id !== id);
+    if (editorState?.character.id === id) editorState = null;
+    if (getRoute().name === 'character' && getRoute().id === id) {
+      navigate('/');
+      return;
+    }
     renderCurrentRoute();
     showToast('Personnage supprimé.');
   } catch (error) {
@@ -1266,6 +1160,18 @@ async function removeCharacter(id) {
 }
 
 async function duplicateCharacter(id) {
+  const duplicateFromSheet = editorState?.character.id === id;
+  if (duplicateFromSheet) {
+    clearTimeout(saveTimer);
+    try {
+      await queueEditorSave();
+      const saved = await getCharacter(id);
+      if (saved) characters[characters.findIndex((item) => item.id === id)] = saved;
+    } catch (error) {
+      showToast(error.message || 'Impossible d’enregistrer la fiche avant duplication.', 'error');
+      return;
+    }
+  }
   const original = characters.find((item) => item.id === id);
   if (!original) return;
   try {
@@ -1279,7 +1185,12 @@ async function duplicateCharacter(id) {
       updatedAt: now
     });
     await saveCharacter(duplicate);
-    await refreshCharacters();
+    if (duplicateFromSheet) {
+      characters.push(duplicate);
+      navigate('/');
+    } else {
+      await refreshCharacters();
+    }
     showToast('Copie du personnage créée.');
   } catch (error) {
     showToast(error.message || 'Impossible de dupliquer ce personnage.', 'error');
@@ -1302,16 +1213,27 @@ function safeFilename(value) {
   return String(value || 'personnage').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'personnage';
 }
 
-function exportOneCharacter(id) {
-  const character = characters.find((item) => item.id === id);
-  if (!character) return;
-  downloadJSON(createCharacterExport(character), `wfrp-personnage-${safeFilename(getCharacterName(character))}.json`);
-  showToast('Fiche exportée au format JSON.');
+async function exportOneCharacter(id) {
+  try {
+    if (editorState?.character.id === id) await queueEditorSave();
+    const character = editorState?.character.id === id ? await getCharacter(id) : characters.find((item) => item.id === id);
+    if (!character) throw new Error('Ce personnage est introuvable.');
+    downloadJSON(createCharacterExport(character), `wfrp-personnage-${safeFilename(getCharacterName(character))}.json`);
+    showToast('Fiche exportée au format JSON.');
+  } catch (error) {
+    showToast(error.message || 'Impossible d’exporter cette fiche.', 'error');
+  }
 }
 
-function exportBackup() {
-  downloadJSON(createBackupExport(characters), `wfrp-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`);
-  showToast('Sauvegarde complète exportée.');
+async function exportBackup() {
+  try {
+    if (editorState) await queueEditorSave();
+    const savedCharacters = editorState ? await getAllCharacters() : characters;
+    downloadJSON(createBackupExport(savedCharacters), `wfrp-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`);
+    showToast('Sauvegarde complète exportée.');
+  } catch (error) {
+    showToast(error.message || 'Impossible de créer la sauvegarde.', 'error');
+  }
 }
 
 async function importJSONFile(file) {
@@ -1324,7 +1246,7 @@ async function importJSONFile(file) {
   const details = copies ? ` ${copies} identifiant(s) déjà présent(s) seront importés sous forme de copies.` : '';
   const noun = prepared.length > 1 ? 'personnages' : 'personnage';
   if (!window.confirm(`Importer ${prepared.length} ${noun} dans ce navigateur ?${details}\n\nLes fiches déjà présentes seront conservées.`)) return;
-  for (const entry of prepared) await saveCharacter(entry.character);
+  await saveCharacters(prepared.map((entry) => entry.character));
   await refreshCharacters();
   showToast(`${prepared.length} ${noun} importé${prepared.length > 1 ? 's' : ''}.`);
   navigate('/');
@@ -1518,7 +1440,21 @@ function openTalentEditor(id = '') {
       form.querySelector('[name="name"]')?.focus();
       return;
     }
+    const candidate = {
+      name,
+      name_fr: String(values.get('name_fr') || '').trim(),
+      name_original: String(values.get('name_original') || '').trim(),
+      aliases: splitLines(values.get('aliases'))
+    };
+    const nameConflict = findTalentNameConflict(referenceEntries, candidate, existing?.id || '');
+    if (nameConflict) {
+      showToast(`Ce nom ou alias est déjà utilisé par « ${nameConflict.name_fr || nameConflict.name} ».`, 'error');
+      return;
+    }
     const maxRankRaw = String(values.get('maxRank') || '').trim();
+    const advancementCostRaw = String(values.get('advancementCost') || '').trim();
+    const advancementCost = advancementCostRaw ? Number(advancementCostRaw) : null;
+    const advancementCostVerified = values.get('advancementCostVerified') === '1';
     const data = {
       id: existing?.id,
       source: existing?.source || 'custom',
@@ -1532,6 +1468,8 @@ function openTalentEditor(id = '') {
       tests: splitLines(values.get('tests')),
       skills: splitLines(values.get('skills')),
       maxRank: maxRankRaw ? Number(maxRankRaw) : null,
+      advancementCost,
+      advancementCostVerified,
       prerequisites: splitLines(values.get('prerequisites')),
       species: values.getAll('species'),
       careerIds: values.getAll('careerIds'),
@@ -1545,11 +1483,20 @@ function openTalentEditor(id = '') {
         url: values.get('sourceUrl'),
         note: values.get('sourceNote')
       },
+      references: splitLines(values.get('references')),
       effects,
       custom: existing?.custom ?? !existing
     };
     if (data.maxRank !== null && (!Number.isInteger(data.maxRank) || data.maxRank < 1 || data.maxRank > 999)) {
       showToast('Le rang maximal doit être un entier compris entre 1 et 999.', 'error');
+      return;
+    }
+    if (advancementCostRaw && (!Number.isInteger(advancementCost) || advancementCost < 1 || advancementCost > 9999)) {
+      showToast('Le coût d’expérience doit être un entier compris entre 1 et 9 999.', 'error');
+      return;
+    }
+    if (advancementCostVerified && (!advancementCost || !(data.references.length || (data.sourceInfo.title && data.sourceInfo.page)))) {
+      showToast('Pour déclarer le coût vérifié, renseignez un coût positif et une référence de source précise.', 'error');
       return;
     }
     try {
@@ -1612,11 +1559,14 @@ async function importTalentFile(file) {
   const conflictDetails = prepared.skipped.length
     ? `\n\n${prepared.skipped.length} doublon(s) ou conflit(s) seront ignorés${conflictNames ? ` : ${conflictNames}` : ''}. Aucune entrée existante ne sera remplacée.`
     : '\n\nAucun conflit détecté. Les entrées existantes ne seront pas remplacées.';
+  const associationDetails = prepared.unresolvedAssociations
+    ? `\n\n${prepared.unresolvedAssociations} association(s) vers une espèce, carrière ou niveau absent(e) de cette base ne peuvent pas être reliées. Elles seront écartées et pourront être renseignées depuis le catalogue après import.`
+    : '';
   if (!prepared.additions.length) {
     showToast(`Import annulé : les ${prepared.skipped.length} talent(s) sont déjà présents ou en conflit.`, 'error');
     return;
   }
-  const accepted = window.confirm(`Importer le pack « ${pack.name} » ?\n\n${prepared.additions.length} nouveau(x) talent(s) seront ajoutés.${conflictDetails}`);
+  const accepted = window.confirm(`Importer le pack « ${pack.name} » ?\n\n${prepared.additions.length} nouveau(x) talent(s) seront ajoutés.${conflictDetails}${associationDetails}`);
   if (!accepted) return;
   const updated = [...referenceEntries, ...prepared.additions];
   await saveReferenceBundle(updated);
@@ -1655,15 +1605,9 @@ async function persistProgressionUpdate(updated) {
   const index = characters.findIndex((item) => item.id === updated.id);
   if (index >= 0) characters[index] = updated;
   else characters.push(updated);
-  if (editorState?.character.id === updated.id) {
-    editorState.character = clone(updated);
-    const total = document.querySelector('[name="experience.total"]');
-    const spent = document.querySelector('[name="experience.spent"]');
-    if (total) total.value = String(updated.experience.total);
-    if (spent) spent.value = String(updated.experience.spent);
-  } else {
-    renderCurrentRoute();
-  }
+  // Les coûts, rangs, remboursements et valeurs calculées sont recalculés
+  // ensemble après chaque opération de progression.
+  renderCurrentRoute();
   setSaveIndicator('Progression enregistrée', 'saved');
 }
 
@@ -1671,15 +1615,28 @@ async function addExperience(requestedId = '') {
   try {
     const character = await getCharacterForProgression(requestedId);
     if (!character) throw new Error('Ouvrez une fiche de personnage avant d’ajouter de l’expérience.');
-    const amount = window.prompt('Combien de points d’expérience ajouter ?', '50');
-    if (amount === null) return;
-    const note = window.prompt('Motif du gain (facultatif) :', 'Gain d’expérience');
-    if (note === null) return;
+    const amount = document.querySelector('[data-xp-gain-amount]')?.value;
+    const note = document.querySelector('[data-xp-gain-note]')?.value || '';
     const updated = grantExperience(character, { amount, note });
     await persistProgressionUpdate(updated);
     showToast(`${Number(amount)} XP ajoutés à la fiche.`);
   } catch (error) {
     showToast(error.message || 'Impossible d’ajouter l’expérience.', 'error');
+  }
+}
+
+async function correctExperienceBalance(requestedId = '') {
+  try {
+    const character = await getCharacterForProgression(requestedId);
+    if (!character) throw new Error('Ce personnage est introuvable.');
+    const total = document.querySelector('[data-xp-correction-total]')?.value;
+    const spent = document.querySelector('[data-xp-correction-spent]')?.value;
+    const note = document.querySelector('[data-xp-correction-note]')?.value || '';
+    const updated = correctExperience(character, { total, spent, note });
+    await persistProgressionUpdate(updated);
+    showToast(`Correction XP enregistrée. Solde : ${getExperienceAvailable(updated)} XP.`);
+  } catch (error) {
+    showToast(error.message || 'Impossible de corriger les XP.', 'error');
   }
 }
 
@@ -1692,17 +1649,117 @@ async function buyAdvancement(button) {
     const target = targetType === 'characteristic'
       ? { type: targetType, key: button.dataset.targetKey }
       : { type: targetType, id: button.dataset.targetId };
-    const cost = Number(button.dataset.cost);
+    const targetEntry = targetType === 'skill'
+      ? character.skills.find((item) => item.id === target.id)
+      : targetType === 'talent' ? character.talents.find((item) => item.id === target.id) : null;
+    const characteristic = CHARACTERISTICS.find((item) => item.key === target.key);
     const targetLabel = targetType === 'characteristic'
-      ? `l’augmentation de ${target.key}`
-      : `${targetType === 'skill' ? 'la compétence' : 'le talent'} sélectionné`;
-    if (!Number.isInteger(cost) || cost <= 0) throw new Error('Aucun coût d’expérience valide n’est configuré pour cette progression.');
-    if (!window.confirm(`Acheter ${targetLabel} pour ${cost} XP ?\n\nLe coût configuré sera enregistré dans l’historique.`)) return;
-    const updated = purchaseAdvancement(character, { target, amount: 1, cost, note: `Progression : ${targetLabel}` });
+      ? `l’augmentation de ${characteristic?.label || target.key}`
+      : targetType === 'skill'
+        ? `la compétence « ${targetEntry?.name || 'inconnue'} »`
+        : targetEntry?.acquired === false
+          ? `l’acquisition du talent « ${targetEntry?.name || 'inconnu'} »`
+          : `le rang suivant du talent « ${targetEntry?.name || 'inconnu'} »`;
+    const updated = purchaseAdvancement(character, { target, amount: 1, note: `Progression : ${targetLabel}` });
+    const cost = updated.experience.history.at(-1).amount;
     await persistProgressionUpdate(updated);
-    showToast(`Progression achetée pour ${cost} XP.`);
+    showToast(`Progression achetée : −${cost} XP. Solde : ${getExperienceAvailable(updated)} XP.`);
   } catch (error) {
     showToast(error.message || 'Impossible d’effectuer cet achat.', 'error');
+  }
+}
+
+async function changeCareer(requestedId = '') {
+  try {
+    const character = await getCharacterForProgression(requestedId);
+    if (!character) throw new Error('Ce personnage est introuvable.');
+    if (character.identity.careerCompleted !== true) {
+      throw new Error('Marquez la carrière actuelle comme terminée après vérification de ses conditions de sortie.');
+    }
+    const careerId = document.querySelector('[data-career-change-career]')?.value || '';
+    const career = referenceEntries.find((entry) => entry.kind === 'careers' && entry.id === careerId);
+    if (!career) throw new Error('Choisissez une nouvelle carrière dans la liste de la fiche.');
+    const levels = getCareerLevels(career);
+    const levelId = document.querySelector('[data-career-change-level]')?.value || '';
+    const level = levels.length === 1 ? levels[0] : levels.find((item) => item.id === levelId) || null;
+    if (levels.length > 1 && !level) throw new Error('Choisissez un niveau de départ pour cette carrière.');
+    const updated = purchaseCareerChange(character, { career, level });
+    await persistProgressionUpdate(updated);
+    showToast(`Changement vers « ${career.name} » enregistré : −${CAREER_CHANGE_COST} XP. Solde : ${getExperienceAvailable(updated)} XP.`);
+  } catch (error) {
+    showToast(error.message || 'Impossible de changer de carrière.', 'error');
+  }
+}
+
+function getRefundSelections(group) {
+  return [...document.querySelectorAll(`[data-refund-count][data-refund-group="${group}"]`)]
+    .map((input) => ({
+      target: input.dataset.targetType === 'characteristic'
+        ? { type: 'characteristic', key: input.dataset.targetKey }
+        : { type: input.dataset.targetType, id: input.dataset.targetId },
+      amount: Number(input.value || 0)
+    }))
+    .filter((selection) => selection.amount > 0);
+}
+
+function refreshRefundPreview(group) {
+  const scopes = [...document.querySelectorAll(`[data-refund-scope="${group}"]`)];
+  const inputs = [...document.querySelectorAll(`[data-refund-count][data-refund-group="${group}"]`)];
+  const selections = getRefundSelections(group);
+  let quote = { amount: 0, count: 0 };
+  let error = '';
+  const character = characters.find((item) => item.id === getRoute().id);
+  if (character && selections.length) {
+    try {
+      quote = quoteProgressionRefund(character, selections);
+    } catch (reason) {
+      error = reason.message || 'Sélection de remboursement invalide.';
+    }
+  }
+  for (const input of inputs) {
+    const line = input.parentElement?.querySelector('[data-refund-line-total]');
+    if (!line) continue;
+    const count = Number(input.value || 0);
+    if (!count) { line.textContent = '0 XP'; continue; }
+    try {
+      const lineQuote = quoteProgressionRefund(character, [{
+        target: input.dataset.targetType === 'characteristic'
+          ? { type: 'characteristic', key: input.dataset.targetKey }
+          : { type: input.dataset.targetType, id: input.dataset.targetId },
+        amount: count
+      }]);
+      line.textContent = `${lineQuote.amount.toLocaleString('fr-FR')} XP`;
+    } catch {
+      line.textContent = '—';
+    }
+  }
+  for (const scope of scopes) {
+    const total = scope.querySelector('[data-refund-total]');
+    if (total) total.textContent = error ? 'Sélection invalide' : `${quote.amount.toLocaleString('fr-FR')} XP`;
+    const button = scope.querySelector('[data-action="refund-selected-progressions"]');
+    if (button) {
+      button.disabled = !selections.length || Boolean(error);
+      button.title = error || (selections.length ? `${quote.count} progression(s) · restitution de ${quote.amount} XP` : 'Sélectionnez les avancements ou talents à rembourser.');
+    }
+  }
+}
+
+async function refundSelectedProgressions(button) {
+  try {
+    const group = button.dataset.refundGroup;
+    const character = await getCharacterForProgression(button.dataset.characterId || '');
+    if (!character) throw new Error('Ce personnage est introuvable.');
+    const selections = getRefundSelections(group);
+    const quote = quoteProgressionRefund(character, selections);
+    if (!quote.count) throw new Error('Sélectionnez les avancements ou talents à rembourser.');
+    const updated = refundAdvancements(character, selections);
+    await persistProgressionUpdate(updated);
+    const note = group === 'talents'
+      ? ' Les effets mécaniques des talents sont recalculés ; vérifiez les éléments qui en dépendaient.'
+      : '';
+    showToast(`${quote.count} progression(s) remboursée(s) : +${quote.amount} XP. Solde : ${getExperienceAvailable(updated)} XP.${note}`);
+  } catch (error) {
+    showToast(error.message || 'Impossible de rembourser cette progression.', 'error');
   }
 }
 
@@ -1710,10 +1767,9 @@ async function undoPurchase(requestedId = '') {
   try {
     const character = await getCharacterForProgression(requestedId);
     if (!character) throw new Error('Ce personnage est introuvable.');
-    if (!window.confirm('Annuler le dernier achat enregistré ? Les avancements et l’expérience dépensée seront restaurés.')) return;
     const updated = undoLastPurchase(character);
     await persistProgressionUpdate(updated);
-    showToast('Dernier achat annulé.');
+    showToast(`Dernière opération annulée. Solde : ${getExperienceAvailable(updated)} XP.`);
   } catch (error) {
     showToast(error.message || 'Impossible d’annuler cet achat.', 'error');
   }
@@ -1723,39 +1779,34 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const { action, id } = button.dataset;
+  if (action === 'scroll-section') {
+    document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   if (action === 'toggle-theme') toggleTheme();
   if (action === 'new-character') await createNewCharacter();
   if (action === 'open-character') {
-    const selected = characters.find((character) => character.id === id);
-    if (selected?.isDraft) await editCharacter(id);
-    else navigate(`/character/${encodeURIComponent(id)}`);
+    openCharacterSheet(id);
   }
-  if (action === 'edit-character') await editCharacter(id);
   if (action === 'delete-character') await removeCharacter(id);
   if (action === 'duplicate-character') await duplicateCharacter(id);
   if (action === 'export-character') exportOneCharacter(id);
   if (action === 'export-backup') exportBackup();
   if (action === 'import-json') importInput.click();
-  if (action === 'close-editor') await closeEditor();
   if (action === 'generate-characteristics') {
     event.preventDefault();
     generateAndApplyCharacteristics();
   }
   if (action === 'undo-characteristics-generation') undoLastCharacteristicGeneration();
-  if (action === 'wizard-prev' || action === 'wizard-next' || action === 'wizard-skip') {
-    const current = editorState?.character.creationWizard?.step || 'identity';
-    const index = CREATION_STEPS.findIndex((step) => step.id === current);
-    const direction = action === 'wizard-prev' ? -1 : 1;
-    const next = CREATION_STEPS[Math.max(0, Math.min(CREATION_STEPS.length - 1, index + direction))];
-    if (next) await setWizardStep(next.id, { skipCurrent: action === 'wizard-skip' && OPTIONAL_CREATION_STEPS.has(current) });
-  }
-  if (action === 'wizard-go') await setWizardStep(button.dataset.step);
-  if (action === 'add-career-skills') addWizardSuggestions('skills', 'career');
-  if (action === 'add-career-talents') addWizardSuggestions('talents', 'career');
-  if (action === 'add-species-skills') addWizardSuggestions('skills', 'species');
-  if (action === 'add-species-talents') addWizardSuggestions('talents', 'species');
+  if (action === 'add-career-skills') addReferenceSuggestions('skills', 'career');
+  if (action === 'add-career-talents') addReferenceSuggestions('talents', 'career');
+  if (action === 'add-species-skills') addReferenceSuggestions('skills', 'species');
+  if (action === 'add-species-talents') addReferenceSuggestions('talents', 'species');
   if (action === 'grant-experience') await addExperience(button.dataset.characterId || '');
+  if (action === 'correct-experience') await correctExperienceBalance(button.dataset.characterId || '');
   if (action === 'purchase-advancement') await buyAdvancement(button);
+  if (action === 'change-career') await changeCareer(button.dataset.characterId || '');
+  if (action === 'refund-selected-progressions') await refundSelectedProgressions(button);
   if (action === 'undo-last-purchase') await undoPurchase(button.dataset.characterId || '');
   if (action === 'add-reference') openReferenceEditor(button.dataset.kind);
   if (action === 'add-talent') openTalentEditor();
@@ -1772,10 +1823,27 @@ document.addEventListener('click', async (event) => {
   if (action === 'close-reference-editor') document.querySelector('#reference-editor-dialog')?.close();
   if (action === 'close-talent-editor') document.querySelector('#talent-editor-dialog')?.close();
   if (action === 'open-references') {
-    await closeEditor();
-    navigate('/references');
+    try {
+      if (editorState) {
+        clearTimeout(saveTimer);
+        await queueEditorSave();
+      }
+      editorState = null;
+      navigate('/references');
+    } catch (error) {
+      showToast(error.message || 'Impossible d’enregistrer la fiche avant de quitter.', 'error');
+    }
   }
 });
+
+function refreshTalentReferenceCards() {
+  const filters = Object.fromEntries([...viewRoot.querySelectorAll('[data-talent-filter]')].map((field) => [field.dataset.talentFilter, field.value]));
+  const results = filterTalentCatalog(referenceEntries, filters);
+  const grid = viewRoot.querySelector('#talent-reference-grid');
+  if (grid) grid.innerHTML = renderTalentCards(results);
+  const count = viewRoot.querySelector('[data-talent-results-count]');
+  if (count) count.textContent = `${results.length} talent(s)`;
+}
 
 document.addEventListener('input', (event) => {
   if (event.target.id === 'character-search') {
@@ -1788,17 +1856,13 @@ document.addEventListener('input', (event) => {
   if (event.target.id === 'reference-search') {
     filterReferenceCards(viewRoot, event.target.value, document.querySelector('#reference-kind-filter')?.value || 'all');
   }
-  if (event.target.matches('[data-talent-filter]')) {
-    const filters = Object.fromEntries([...viewRoot.querySelectorAll('[data-talent-filter]')].map((field) => [field.dataset.talentFilter, field.value]));
-    const results = filterTalentCatalog(referenceEntries, filters);
-    const grid = viewRoot.querySelector('#talent-reference-grid');
-    if (grid) grid.innerHTML = renderTalentCards(results);
-    const count = viewRoot.querySelector('[data-talent-results-count]');
-    if (count) count.textContent = `${results.length} talent(s)`;
-  }
+  if (event.target.matches('[data-talent-filter]')) refreshTalentReferenceCards();
+  if (event.target.matches('[data-refund-count]')) refreshRefundPreview(event.target.dataset.refundGroup);
 });
 
 document.addEventListener('change', (event) => {
+  if (event.target.matches('[data-talent-filter]')) refreshTalentReferenceCards();
+  if (event.target.matches('[data-refund-count]')) refreshRefundPreview(event.target.dataset.refundGroup);
   if (event.target.id === 'character-sort') {
     filterState.sort = event.target.value;
     updateCharacterGrid();
@@ -1845,9 +1909,37 @@ talentImportInput?.addEventListener('change', async () => {
   }
 });
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', async () => {
+  if (editorState) {
+    clearTimeout(saveTimer);
+    try {
+      await queueEditorSave();
+    } catch (error) {
+      setSaveIndicator('Erreur de sauvegarde', 'error');
+      showToast(error.message || 'Les dernières modifications n’ont pas pu être enregistrées.', 'error');
+      return;
+    }
+  }
+  editorState = null;
   renderCurrentRoute();
   viewRoot.focus({ preventScroll: true });
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || !editorState) return;
+  clearTimeout(saveTimer);
+  queueEditorSave().catch((error) => {
+    updateAutosaveState('Échec de la sauvegarde', 'error');
+    setSaveIndicator('Erreur de sauvegarde', 'error');
+    console.error('Échec de la sauvegarde avant masquage de la page :', error);
+  });
+});
+window.addEventListener('pagehide', () => {
+  if (!editorState) return;
+  clearTimeout(saveTimer);
+  queueEditorSave().catch((error) => {
+    setSaveIndicator('Erreur de sauvegarde', 'error');
+    console.error('Échec de la sauvegarde avant fermeture de la page :', error);
+  });
 });
 window.addEventListener('online', updateConnectionStatus);
 window.addEventListener('offline', updateConnectionStatus);
@@ -1864,14 +1956,17 @@ window.addEventListener('keydown', (event) => {
 async function startApp() {
   applyTheme();
   updateConnectionStatus();
+  let storageReady = false;
   try {
     referenceEntries = await initializeBuiltInReferences();
     await refreshCharacters();
+    storageReady = true;
     setSaveIndicator('Stockage local prêt', 'saved');
   } catch (error) {
     try {
       referenceEntries = await getAllReferenceEntries();
       await refreshCharacters();
+      storageReady = true;
       setSaveIndicator('Stockage local prêt · référentiels en cache', 'saved');
       showToast(`Les référentiels intégrés n’ont pas pu être actualisés : ${error.message}`, 'error');
     } catch (storageError) {
@@ -1880,7 +1975,7 @@ async function startApp() {
     }
   }
 
-  if (referenceEntries.length > 0) {
+  if (storageReady) {
     const createButton = document.querySelector('[data-action="new-character"]');
     if (createButton) createButton.disabled = false;
   }

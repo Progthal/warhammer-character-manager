@@ -5,22 +5,27 @@ import { normalizeReference, validateReferenceEntries } from '../src/services/re
 import {
   createTalentCatalogExport,
   filterTalentCatalog,
+  findTalentNameConflict,
   findTalentReference,
+  mergeCharacterTalentEntries,
   normalizeTalentText,
   parseTalentPack,
   prepareTalentPack
 } from '../src/services/talents.js';
 import { normalizeCharacter } from '../src/models/character.js';
+import { calculateCharacteristics } from '../src/rules/character-calculations.js';
 import { renderTalentCards, renderTalentEditor, renderReferenceManager } from '../src/views/reference-manager.js';
+import { renderTalentPicker } from '../src/components/talent-picker.js';
 
 const dataset = JSON.parse(await readFile(new URL('../data/talents.json', import.meta.url), 'utf8'));
 const builtins = dataset.entries.map((entry) => normalizeReference('talents', entry, { source: 'builtin' }));
 
-test('le catalogue livré contient 162 identifiants stables et n’invente pas de propriétés de règle', () => {
+test('le catalogue livré contient 180 identifiants stables et n’invente pas de propriétés de règle', () => {
   assert.equal(dataset.kind, 'talents');
   assert.equal(dataset.schemaVersion, 1);
-  assert.equal(dataset.entries.length, 162);
-  assert.equal(new Set(dataset.entries.map((entry) => entry.id)).size, 162);
+  assert.equal(dataset.version, 2);
+  assert.equal(dataset.entries.length, 180);
+  assert.equal(new Set(dataset.entries.map((entry) => entry.id)).size, 180);
   assert.ok(dataset.entries.every((entry) => /^builtin:talent:[a-z0-9-]+$/.test(entry.id)));
   assert.ok(dataset.entries.every((entry) => entry.verification_status === 'community'));
   assert.ok(dataset.entries.every((entry) => entry.description === '' && entry.category === '' && entry.effects.length === 0));
@@ -43,7 +48,18 @@ test('la normalisation conserve les noms français/originaux, rangs, effets vér
   assert.equal(talent.effects[0].verified, true);
   assert.equal(talent.sourceInfo.page, '123');
   assert.equal(talent.verificationStatus, 'verified');
-  assert.equal(validateReferenceEntries([talent]).valid, true);
+  const linkedReferences = [
+    { id: 'builtin:species:dwarf', kind: 'species' },
+    { id: 'builtin:career:guard', kind: 'careers', levels: [{ id: 'level:guard' }] }
+  ];
+  const linkedTalent = normalizeReference('talents', {
+    ...talent,
+    species: ['builtin:species:dwarf'],
+    careerIds: ['builtin:career:guard'],
+    careerLevelIds: ['level:guard']
+  });
+  assert.equal(validateReferenceEntries([linkedTalent], { existingEntries: linkedReferences }).valid, true);
+  assert.equal(validateReferenceEntries([linkedTalent]).valid, false);
 });
 
 test('la recherche reconnaît les accents, les noms originaux et les alias sans ambiguïté', () => {
@@ -55,6 +71,37 @@ test('la recherche reconnaît les accents, les noms originaux et les alias sans 
   assert.equal(findTalentReference(catalog, '', 'Politesse').id, talent.id);
   assert.equal(findTalentReference(catalog, '', 'Étiquette').id, talent.id);
   assert.equal(findTalentReference(catalog, talent.id, 'nom historique').id, talent.id);
+  assert.equal(findTalentNameConflict(catalog, { name: 'Autre', aliases: ['Politesse'] })?.id, talent.id);
+  assert.equal(findTalentNameConflict(catalog, { name: 'Étiquette mise à jour' }, talent.id), null);
+});
+
+test('le sélecteur fournit une zone de recherche accessible et un aperçu de la source', () => {
+  const talent = builtins[0];
+  const markup = renderTalentPicker({ id: 'talent-row-1', name: talent.name }, builtins);
+  assert.match(markup, /role="combobox"/);
+  assert.match(markup, /aria-autocomplete="list"/);
+  assert.match(markup, /role="listbox"/);
+  assert.match(markup, /WFRP4e Wikidot/);
+  assert.match(markup, /data-talent-clear/);
+});
+
+test('les répétitions d’un même talent sont regroupées sur un seul rang de fiche', () => {
+  const entries = mergeCharacterTalentEntries([
+    { id: 'row-one', referenceId: 'talent:etiquette', name: 'Étiquette', rank: 1, maxRank: 3, acquired: false, status: 'selected' },
+    { id: 'row-two', referenceId: 'talent:etiquette', name: 'Etiquette', rank: 2, acquired: true, status: 'acquired', references: ['Livre p. 42'] },
+    { id: 'row-three', name: 'Chance', rank: 1, acquired: false }
+  ]);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].id, 'row-one');
+  assert.equal(entries[0].rank, 2);
+  assert.equal(entries[0].maxRank, 3);
+  assert.equal(entries[0].acquired, true);
+  assert.deepEqual(entries[0].references, ['Livre p. 42']);
+  const distinct = mergeCharacterTalentEntries([
+    { id: 'distinct-one', referenceId: 'talent:one', name: 'Tradition', nameFr: 'Tradition', rank: 1 },
+    { id: 'distinct-two', referenceId: 'talent:two', name: 'Tradition', nameFr: 'Tradition', rank: 1 }
+  ]);
+  assert.equal(distinct.length, 2);
 });
 
 test('les filtres du catalogue se combinent sur catégorie, espèce, carrière, test et statut', () => {
@@ -78,6 +125,7 @@ test('les filtres du catalogue se combinent sur catégorie, espèce, carrière, 
     const second = catalog.find((item) => item.id === b);
     return (first.name_fr || first.name).localeCompare(second.name_fr || second.name, 'fr');
   }));
+  assert.equal(filterTalentCatalog(catalog, { speciesId: '__none' }).length, 182);
 });
 
 test('export et import de pack détectent les collisions sans écraser le catalogue existant', () => {
@@ -100,6 +148,36 @@ test('export et import de pack détectent les collisions sans écraser le catalo
   assert.equal(builtins.some((entry) => entry.id === custom.id), false);
 });
 
+test('un pack remappe les associations espèce, carrière et niveau par leurs noms si les ID ont changé', () => {
+  const sourceSpecies = { id: 'source:species:dwarf', kind: 'species', name: 'Nain' };
+  const sourceCareer = { id: 'source:career:guard', kind: 'careers', name: 'Garde', levels: [{ id: 'source:level:guard', name: 'Soldat' }] };
+  const talent = normalizeReference('talents', {
+    id: 'source:talent:watchful', name: 'Vigilance', species: [sourceSpecies.id],
+    careerIds: [sourceCareer.id], careerLevelIds: ['source:level:guard']
+  }, { source: 'custom' });
+  const exported = createTalentCatalogExport([sourceSpecies, sourceCareer, talent]);
+  const targetSpecies = { id: 'target:species:dwarf', kind: 'species', name: 'Nain' };
+  const targetCareer = { id: 'target:career:guard', kind: 'careers', name: 'Garde', levels: [{ id: 'target:level:guard', name: 'Soldat' }] };
+  const parsed = parseTalentPack(exported, [targetSpecies, targetCareer]);
+  const prepared = prepareTalentPack(parsed, [targetSpecies, targetCareer]);
+  assert.equal(prepared.unresolvedAssociations, 0);
+  assert.deepEqual(prepared.additions[0].species, [targetSpecies.id]);
+  assert.deepEqual(prepared.additions[0].careerIds, [targetCareer.id]);
+  assert.deepEqual(prepared.additions[0].careerLevelIds, ['target:level:guard']);
+});
+
+test('un pack conserve les talents mais retire une association devenue introuvable', () => {
+  const payload = {
+    app: 'warhammer-character-manager', type: 'talent-pack', version: 1,
+    pack: { entries: [{ id: 'source:talent:one', name: 'Talent lié', species: ['source:species:unknown'] }] }
+  };
+  const parsed = parseTalentPack(payload, []);
+  const prepared = prepareTalentPack(parsed, []);
+  assert.equal(prepared.additions.length, 1);
+  assert.equal(prepared.unresolvedAssociations, 1);
+  assert.deepEqual(prepared.additions[0].species, []);
+});
+
 test('un import refuse les identifiants dupliqués au sein du même fichier', () => {
   const payload = {
     app: 'warhammer-character-manager', type: 'talent-pack', version: 1,
@@ -111,6 +189,17 @@ test('un import refuse les identifiants dupliqués au sein du même fichier', ()
   assert.throws(() => parseTalentPack(payload, []), /identifiant dupliqué/i);
 });
 
+test('un import refuse aussi les collisions d’alias entre talents du même pack', () => {
+  const payload = {
+    app: 'warhammer-character-manager', type: 'talent-pack', version: 1,
+    pack: { entries: [
+      { id: 'one', name: 'Premier', aliases: ['Alias partagé'] },
+      { id: 'two', name: 'Second', aliases: ['Alias partagé'] }
+    ] }
+  };
+  assert.throws(() => parseTalentPack(payload, []), /nom ou alias.*en double/i);
+});
+
 test('les personnages conservent le lien et un instantané du talent référencé', () => {
   const character = normalizeCharacter({
     talents: [{
@@ -119,7 +208,10 @@ test('les personnages conservent le lien et un instantané du talent référenc�
       rank: 2, maxRank: 3, verificationStatus: 'community',
       prerequisites: ['Prérequis conservé'],
       tests: ['Force'], skills: ['Endurance'],
-      effects: [{ type: 'skillBonus', skillId: 'skill:endurance', skillName: 'Endurance', value: 10, verified: true, condition: 'Une condition', reference: 'Livre p. 12' }],
+      effects: [
+        { type: 'skillBonus', skillId: 'skill:endurance', skillName: 'Endurance', value: 10, verified: true, condition: 'Une condition', reference: 'Livre p. 12' },
+        { type: 'resourceChange', target: 'fortune', resource: 'fortune', operation: 'add', value: 1, formula: 'future rule', verified: false }
+      ],
       sourceInfo: { title: 'Source mémorisée', page: '12' }
     }]
   });
@@ -132,7 +224,28 @@ test('les personnages conservent le lien et un instantané du talent référenc�
   assert.deepEqual(talent.skills, ['Endurance']);
   assert.equal(talent.effects[0].type, 'skillBonus');
   assert.equal(talent.effects[0].skillId, 'skill:endurance');
+  assert.equal(talent.effects[1].type, 'resourceChange');
+  assert.equal(talent.effects[1].resource, 'fortune');
+  assert.equal(talent.effects[1].verified, false);
   assert.equal(talent.sourceInfo.title, 'Source mémorisée');
+});
+
+test('la normalisation des anciennes fiches fusionne les rangs sans dupliquer un effet', () => {
+  const verifiedEffect = { type: 'characteristicBonus', characteristic: 'F', value: 5, verified: true, reference: 'Livre p. 50' };
+  const character = normalizeCharacter({ talents: [
+    { id: 'talent-row-a', referenceId: 'builtin:talent:linguistics', name: 'Polyglotte', nameOriginal: 'Linguistics', rank: 1, maxRank: 3, effects: [verifiedEffect] },
+    { id: 'talent-row-b', referenceId: 'builtin:talent:linguistics', name: 'Linguistics', nameFr: 'Polyglotte', rank: 2, acquired: true, effects: [verifiedEffect] }
+  ] });
+  assert.equal(character.talents.length, 1);
+  assert.equal(character.talents[0].rank, 2);
+  assert.equal(character.talents[0].acquired, true);
+  assert.equal(character.talents[0].effects.length, 1);
+  const calculated = calculateCharacteristics({
+    ...character,
+    characteristics: { F: 40 },
+    characteristicSpeciesModifiers: { F: 0 }
+  });
+  assert.equal(calculated.F.talentBonus, 5);
 });
 
 test('les vues du référentiel séparent les talents et affichent le statut de vérification', () => {
@@ -142,6 +255,7 @@ test('les vues du référentiel séparent les talents et affichent le statut de 
   const editor = renderTalentEditor(null, []);
   assert.match(editor, /Nom français/);
   assert.match(editor, /Effets mécaniques/);
+  assert.match(editor, /Références précises/);
   const manager = renderReferenceManager(builtins.slice(0, 1));
   assert.match(manager, /Catalogue des talents/);
   assert.match(manager, /1 talent\(s\) indexé\(s\)/);

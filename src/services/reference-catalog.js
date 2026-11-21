@@ -109,6 +109,10 @@ function cleanTalentEffects(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 30).filter((effect) => effect && typeof effect === 'object' && !Array.isArray(effect)).map((effect) => ({
     type: cleanText(effect.type, 50) || 'none',
+    target: cleanText(effect.target, 120),
+    resource: cleanText(effect.resource, 80),
+    operation: cleanText(effect.operation, 30),
+    formula: cleanText(effect.formula, 500),
     characteristic: CHARACTERISTIC_KEY_SET.has(effect.characteristic) ? effect.characteristic : '',
     skillId: cleanText(effect.skillId, 180),
     skillName: cleanText(effect.skillName, 160),
@@ -128,6 +132,9 @@ function normalizeTalentReference(input, common, source) {
   const availability = cleanText(input?.availability, 40);
   const sourceInfo = input?.source_info || input?.sourceInfo;
   const sourceRecord = sourceInfo && typeof sourceInfo === 'object' && !Array.isArray(sourceInfo) ? sourceInfo : {};
+  const advancementCost = input?.advancementCost === null || input?.advancementCost === undefined || input?.advancementCost === ''
+    ? null
+    : Number(input.advancementCost);
   return {
     ...common,
     name_fr: cleanText(input?.name_fr || input?.nameFr, 160),
@@ -137,6 +144,9 @@ function normalizeTalentReference(input, common, source) {
     tests: cleanList(input?.tests, 30),
     skills: cleanList(input?.skills, 50),
     maxRank: Number.isInteger(normalizedMaxRank) && normalizedMaxRank > 0 ? Math.min(normalizedMaxRank, 999) : null,
+    ...(Number.isInteger(advancementCost) && advancementCost > 0 && input?.advancementCostVerified === true
+      ? { advancementCost, advancementCostVerified: true }
+      : {}),
     effects: cleanTalentEffects(input?.effects),
     prerequisites: cleanList(input?.prerequisites, 50),
     species: cleanIdList(input?.species),
@@ -298,7 +308,7 @@ export function normalizeReference(kind, input, options = {}) {
   };
 }
 
-export function validateReferenceEntries(entries, { existingEntries = [] } = {}) {
+export function validateReferenceEntries(entries, { existingEntries = [], allowMissingTalentLinks = false } = {}) {
   const errors = [];
   if (!Array.isArray(entries) || entries.length > 1000) {
     return { valid: false, errors: ['Le paquet doit contenir un tableau de 1 000 entrées maximum.'] };
@@ -419,6 +429,15 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
   }
 
   const knownTypes = new Map(existingEntries.map((entry) => [entry.id, entry.kind]));
+  const knownCareerLevels = new Map();
+  for (const entry of [...existingEntries, ...entries]) {
+    if (entry?.kind !== 'careers' || !Array.isArray(entry.levels)) continue;
+    for (const level of entry.levels) {
+      if (level && typeof level === 'object' && typeof level.id === 'string') {
+        knownCareerLevels.set(level.id, entry.id);
+      }
+    }
+  }
   entries.forEach((entry) => {
     if (entry && typeof entry === 'object' && typeof entry.id === 'string') knownTypes.set(entry.id, entry.kind);
   });
@@ -426,12 +445,34 @@ export function validateReferenceEntries(entries, { existingEntries = [] } = {})
     if (!entry || typeof entry !== 'object') continue;
     const relationFields = entry.kind === 'religions'
       ? { deityIds: 'deities' }
-      : entry.kind === 'deities' ? { religionIds: 'religions' } : {};
+      : entry.kind === 'deities' ? { religionIds: 'religions' }
+        : entry.kind === 'talents' ? {
+          species: 'species',
+          careerIds: 'careers',
+          career_ids: 'careers',
+          careerLevelIds: 'careerLevels',
+          career_level_ids: 'careerLevels'
+        } : {};
     for (const [field, expectedKind] of Object.entries(relationFields)) {
       if (entry[field] === undefined) continue;
       if (!Array.isArray(entry[field])) errors.push(`Entrée ${index + 1} : champ « ${field} » invalide.`);
-      else if (entry[field].some((id) => typeof id !== 'string' || knownTypes.get(id) !== expectedKind)) {
+      else if (entry[field].some((id) => {
+        if (typeof id !== 'string') return true;
+        const linked = expectedKind === 'careerLevels' ? knownCareerLevels.has(id) : knownTypes.get(id) === expectedKind;
+        if (linked) return false;
+        const missing = expectedKind === 'careerLevels' ? !knownCareerLevels.has(id) : !knownTypes.has(id);
+        return !(entry.kind === 'talents' && allowMissingTalentLinks && missing);
+      })) {
         errors.push(`Entrée ${index + 1} : relation absente ou de type incompatible dans « ${field} ».`);
+      }
+    }
+    if (entry.kind === 'talents') {
+      const careerIdsValue = entry.careerIds || entry.career_ids || [];
+      const levelIdsValue = entry.careerLevelIds || entry.career_level_ids || [];
+      const careerIds = Array.isArray(careerIdsValue) ? careerIdsValue : [];
+      const levelIds = Array.isArray(levelIdsValue) ? levelIdsValue : [];
+      if (careerIds.length && levelIds.some((id) => knownCareerLevels.has(id) && !careerIds.includes(knownCareerLevels.get(id)))) {
+        errors.push(`Entrée ${index + 1} : un niveau associé ne dépend pas d’une carrière déclarée dans « careerIds ».`);
       }
     }
   }
@@ -501,6 +542,67 @@ export function findCareerLevel(career, levelId = '', legacyName = '') {
   if (!normalizedName) return null;
   const matches = levels.filter((level) => level.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr-FR') === normalizedName);
   return matches.length === 1 ? matches[0] : null;
+}
+
+function normalizeReferenceName(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('fr-FR');
+}
+
+function verifiedCost(candidates) {
+  const costs = [...new Set(candidates
+    .filter((entry) => entry?.advancementCostVerified === true && (
+      String(entry.advancementCostReference || '').trim()
+      || (Array.isArray(entry.references) && entry.references.some((reference) => String(reference || '').trim()))
+      || (String(entry.sourceInfo?.title || '').trim() && String(entry.sourceInfo?.page || '').trim())
+    ))
+    .map((entry) => Number(entry.advancementCost))
+    .filter((cost) => Number.isInteger(cost) && cost > 0 && cost <= 9999))];
+  return costs.length === 1 ? costs[0] : null;
+}
+
+/** Renvoie uniquement un coût de compétence explicitement marqué comme vérifié. */
+export function getSkillAdvancementCost(skill, entries = []) {
+  const direct = verifiedCost([skill]);
+  if (direct) return direct;
+  const name = normalizeReferenceName(skill?.name);
+  const referenceId = String(skill?.referenceId || '');
+  const candidates = [];
+  for (const reference of entries) {
+    if (!['careers', 'species'].includes(reference.kind)) continue;
+    if (skill?.sourceCareerId && reference.kind === 'careers' && reference.id !== skill.sourceCareerId) continue;
+    if (skill?.sourceSpeciesId && reference.kind === 'species' && reference.id !== skill.sourceSpeciesId) continue;
+    const lists = [reference.skills || []];
+    for (const level of reference.levels || []) {
+      if (skill?.sourceCareerLevelId && level?.id !== skill.sourceCareerLevelId) continue;
+      lists.push(level?.skills || []);
+    }
+    for (const list of lists) {
+      for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const matchesId = referenceId && String(item.id || item.referenceId || '') === referenceId;
+        const matchesName = name && normalizeReferenceName(item.name) === name;
+        if (matchesId || matchesName) candidates.push(item);
+      }
+    }
+  }
+  return verifiedCost(candidates);
+}
+
+/** Renvoie uniquement un coût de talent explicitement validé dans le référentiel. */
+export function getTalentAdvancementCost(talent, entries = []) {
+  const direct = verifiedCost([talent]);
+  if (direct) return direct;
+  const referenceId = String(talent?.referenceId || '');
+  const names = new Set([talent?.name, talent?.nameFr, talent?.nameOriginal]
+    .map(normalizeReferenceName).filter(Boolean));
+  const matches = entries.filter((entry) => entry.kind === 'talents' && (
+    (referenceId && entry.id === referenceId)
+    || names.has(normalizeReferenceName(entry.name))
+    || names.has(normalizeReferenceName(entry.name_fr))
+    || names.has(normalizeReferenceName(entry.name_original))
+    || (entry.aliases || []).some((alias) => names.has(normalizeReferenceName(alias)))
+  ));
+  return verifiedCost(matches);
 }
 
 export function createCustomReference(kind, values = {}) {

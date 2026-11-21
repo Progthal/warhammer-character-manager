@@ -50,6 +50,7 @@ function listNames(value) {
       verificationStatus: String(item.verificationStatus || item.verification_status || ''),
       description: String(item.description || ''),
       conditions: String(item.conditions || item.acquisitionConditions || ''),
+      prerequisites: Array.isArray(item.prerequisites) ? item.prerequisites.map((value) => String(value || '')).filter(Boolean) : [],
       effects: Array.isArray(item.effects) ? item.effects : [],
       references: Array.isArray(item.references) ? item.references : []
     };
@@ -90,10 +91,11 @@ export function mergeSuggestedEntries(existingEntries, suggestions, metadata = {
   const existing = Array.isArray(existingEntries) ? [...existingEntries] : [];
   const known = new Set(existing.map((entry) => normalizeName(entry?.name)).filter(Boolean));
   const knownReferences = new Set(existing.map((entry) => String(entry?.referenceId || '')).filter(Boolean));
+  const knownNamesWithoutReference = new Set(existing.filter((entry) => !entry?.referenceId).map((entry) => normalizeName(entry?.name)).filter(Boolean));
   const additions = [];
   for (const suggestion of listNames(suggestions)) {
     const key = normalizeName(suggestion.name);
-    if (!key || known.has(key) || (suggestion.id && knownReferences.has(suggestion.id))) continue;
+    if (!key || (suggestion.id ? (knownReferences.has(suggestion.id) || knownNamesWithoutReference.has(key)) : known.has(key))) continue;
     known.add(key);
     if (suggestion.id) knownReferences.add(suggestion.id);
     additions.push({
@@ -108,6 +110,7 @@ export function mergeSuggestedEntries(existingEntries, suggestions, metadata = {
         baseValue: suggestion.baseValueVerified ? suggestion.baseValue : null,
         useCharacteristicBase: suggestion.useCharacteristicBase && characteristicKeys.has(suggestion.characteristic),
         advancementCost: suggestion.advancementCostVerified ? suggestion.advancementCost : null,
+        advancementCostVerified: suggestion.advancementCostVerified,
         career: Boolean(metadata.sourceCareerId)
       } : {}),
       ...(metadata.collection === 'talents' ? {
@@ -121,7 +124,10 @@ export function mergeSuggestedEntries(existingEntries, suggestions, metadata = {
         conditions: suggestion.conditions,
         effects: suggestion.effects,
         advancementCost: suggestion.advancementCostVerified ? suggestion.advancementCost : null,
-        references: suggestion.references
+        advancementCostVerified: suggestion.advancementCostVerified,
+        references: suggestion.references,
+        prerequisites: suggestion.prerequisites,
+        prerequisitesVerified: false
       } : {}),
       sourceCareerId: metadata.sourceCareerId || '',
       sourceCareerLevelId: metadata.sourceCareerLevelId || '',
@@ -198,17 +204,6 @@ export function validateCharacterCreation(character, references = []) {
   const duplicateTalents = duplicateNames(talents);
   if (duplicateSkills.length) addMessage(warnings, 'warning', 'skills', `Compétences en double : ${duplicateSkills.join(', ')}.`);
   if (duplicateTalents.length) addMessage(warnings, 'warning', 'talents', `Talents en double : ${duplicateTalents.join(', ')}.`);
-  for (const group of groupBy(talents, (talent) => talent.referenceId || normalizeName(talent.name))) {
-    const ranks = group.map((talent) => Number(talent.rank) || 1).sort((a, b) => a - b);
-    if (ranks.length > 1 && new Set(ranks).size !== ranks.length) {
-      addMessage(warnings, 'warning', 'talents', `Le talent « ${group[0].name} » possède des rangs répétés.`);
-    }
-    const rankSet = new Set(ranks);
-    const missingRanks = Array.from({ length: Math.max(0, ...ranks) }, (_, index) => index + 1).filter((rank) => !rankSet.has(rank));
-    if (missingRanks.length) {
-      addMessage(warnings, 'warning', 'talents', `Le talent « ${group[0].name} » présente une progression de rang incomplète (rang(s) ${missingRanks.join(', ')} absent(s)).`);
-    }
-  }
   for (const skill of skills) {
     if (skill.status !== 'acquired' && skill.acquired !== true) addMessage(information, 'info', 'skills', `« ${skill.name} » est sélectionnée mais pas marquée comme acquise.`);
   }
@@ -336,17 +331,6 @@ function duplicateNames(entries) {
     seen.add(name);
   }
   return [...duplicates];
-}
-
-function groupBy(entries, keyOf) {
-  const groups = new Map();
-  for (const entry of entries) {
-    const key = keyOf(entry);
-    if (!key) continue;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(entry);
-  }
-  return [...groups.values()];
 }
 
 export function getStepIndex(stepId) {

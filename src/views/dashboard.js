@@ -27,7 +27,6 @@ function characterCard(character) {
       <div class="card-footer">
         <span class="status-badge ${character.isDraft ? 'status-draft' : ''}"><i></i>${character.isDraft ? 'Brouillon' : escapeHTML(identity.status || 'Actif')}</span>
         <div class="card-actions">
-          <button class="icon-button" type="button" data-action="edit-character" data-id="${escapeHTML(character.id)}" aria-label="Modifier ${escapeHTML(name)}" title="Modifier">✎</button>
           <button class="icon-button" type="button" data-action="duplicate-character" data-id="${escapeHTML(character.id)}" aria-label="Dupliquer ${escapeHTML(name)}" title="Dupliquer">▣</button>
           <button class="icon-button" type="button" data-action="export-character" data-id="${escapeHTML(character.id)}" aria-label="Exporter ${escapeHTML(name)}" title="Exporter">⇩</button>
           <button class="icon-button icon-button-danger" type="button" data-action="delete-character" data-id="${escapeHTML(character.id)}" aria-label="Supprimer ${escapeHTML(name)}" title="Supprimer">×</button>
@@ -44,9 +43,6 @@ export function renderCharacterGrid(characters) {
 }
 
 export function renderDashboard(characters) {
-  const totalExperience = characters.reduce((sum, character) => sum + (character.experience?.total || 0), 0);
-  const activeCount = characters.filter((character) => !character.isDraft && character.identity.status !== 'Inactif').length;
-  const latest = [...characters].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
   return `
     <section class="page-heading">
       <div>
@@ -55,12 +51,6 @@ export function renderDashboard(characters) {
         <p class="page-intro">Chaque destinée commence par un nom. Retrouvez ici les héros qui parcourent le Vieux Monde.</p>
       </div>
       <div class="heading-seal" aria-hidden="true"><span>W</span><small>WFRP<br>IV</small></div>
-    </section>
-
-    <section class="overview-grid" aria-label="Aperçu du registre">
-      <article class="overview-card overview-card-featured"><div class="overview-icon">♙</div><div><span>Fiches enregistrées</span><strong>${characters.length.toLocaleString('fr-FR')}</strong><small>${activeCount} personnage${activeCount > 1 ? 's' : ''} actif${activeCount > 1 ? 's' : ''}</small></div><span class="overview-corner">I</span></article>
-      <article class="overview-card"><div class="overview-icon">✧</div><div><span>Expérience cumulée</span><strong>${totalExperience.toLocaleString('fr-FR')}</strong><small>Points gagnés sur vos fiches</small></div><span class="overview-corner">II</span></article>
-      <article class="overview-card"><div class="overview-icon">◷</div><div><span>Dernière chronique</span><strong class="overview-date">${latest ? escapeHTML(formatRelativeDate(latest.updatedAt)) : '—'}</strong><small>${latest ? escapeHTML(getCharacterName(latest)) : 'Aucune activité récente'}</small></div><span class="overview-corner">III</span></article>
     </section>
 
     <section class="roster-section">
@@ -75,6 +65,5 @@ export function renderDashboard(characters) {
       </div>
       <div class="character-grid" id="character-grid">${renderCharacterGrid(characters)}</div>
     </section>
-
-    <section class="privacy-note"><span class="privacy-icon">⌑</span><p><strong>Votre registre vous appartient.</strong> Vos personnages sont enregistrés dans le stockage privé de ce navigateur. Exportez régulièrement une sauvegarde JSON pour les retrouver sur un autre appareil.</p><button type="button" data-action="export-backup" class="text-button">Créer une sauvegarde <span>→</span></button></section>`;
+    `;
 }

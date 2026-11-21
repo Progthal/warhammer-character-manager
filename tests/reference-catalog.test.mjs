@@ -8,6 +8,8 @@ import {
   createCustomReference,
   exportCustomReferencePack,
   findCareerLevel,
+  getSkillAdvancementCost,
+  getTalentAdvancementCost,
   getCareerLevels,
   getReferenceOptions,
   loadBuiltInReferenceData,
@@ -19,7 +21,7 @@ import {
 } from '../src/services/reference-catalog.js';
 import { filterReferenceOptions, findReferenceByLegacyValue, isDeityCompatibleWithReligion } from '../src/components/reference-picker.js';
 import { upgradeDatabase, DATABASE_VERSION, migrateCareerReferenceRecord, migrateCharacterRecord } from '../src/database/migrations.js';
-import { mergeBuiltInCareerLevels } from '../src/database/indexeddb.js';
+import { mergeBuiltInCareerLevels, mergeBuiltInTalentReferences } from '../src/database/indexeddb.js';
 import { renderCareerLevelsEditor, renderReferenceEditor, renderReferenceManager } from '../src/views/reference-manager.js';
 
 const kinds = ['religions', 'deities', 'careers', 'species', 'talents'];
@@ -64,7 +66,7 @@ test('le chargement automatique récupère les cinq jeux JSON versionnés', asyn
     assert.deepEqual(requested.sort(), ['careers', 'deities', 'religions', 'species', 'talents']);
     assert.equal(loaded.find((dataset) => dataset.kind === 'careers').version, 3);
     assert.equal(loaded.find((dataset) => dataset.kind === 'species').version, 1);
-    assert.equal(loaded.find((dataset) => dataset.kind === 'talents').entries.length, 162);
+    assert.equal(loaded.find((dataset) => dataset.kind === 'talents').entries.length, 180);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -152,6 +154,24 @@ test('une mise à jour du seed ajoute les nouveaux niveaux intégrés sans rempl
   assert.equal(merged.levels[0].name, 'Niveau existant');
   assert.equal(merged.levels[1].careerId, careerId);
   assert.equal(mergeBuiltInCareerLevels(merged, incoming), merged);
+});
+
+test('une mise à jour du seed des talents ajoute les alias et références sans remplacer les données locales', () => {
+  const existing = normalizeReference('talents', {
+    id: 'builtin:talent:flee', name: 'Flee', aliases: [], references: [],
+    sourceInfo: { title: 'Index historique' }
+  }, { source: 'builtin' });
+  const incoming = normalizeReference('talents', {
+    id: 'builtin:talent:flee', name: 'Flee', aliases: ['Flee!'], references: ['Livre de base, p. 130'],
+    sourceInfo: { title: 'Index historique', note: 'Note de mise à jour' }
+  }, { source: 'builtin' });
+  const merged = mergeBuiltInTalentReferences(existing, incoming);
+  assert.deepEqual(merged.aliases, ['Flee!']);
+  assert.deepEqual(merged.references, ['Livre de base, p. 130']);
+  assert.equal(merged.sourceInfo.title, 'Index historique');
+  assert.equal(merged.sourceInfo.note, 'Note de mise à jour');
+  assert.equal(merged.name, 'Flee');
+  assert.equal(mergeBuiltInTalentReferences(merged, incoming), merged);
 });
 
 test('l’administration affiche la gestion des niveaux des carrières intégrées sans déverrouiller leur nom', () => {
@@ -282,11 +302,43 @@ test('la migration IndexedDB v2 ajoute les référentiels sans supprimer le maga
   };
   const transaction = { objectStore: () => ({ openCursor() { const request = {}; queueMicrotask(() => { request.result = null; request.onsuccess?.(); }); return request; } }) };
   upgradeDatabase(database, transaction, 0);
-  assert.equal(DATABASE_VERSION, 5);
+  assert.equal(DATABASE_VERSION, 7);
   assert.ok(stores.has('characters'));
   assert.ok(stores.has('referenceEntries'));
   assert.ok(stores.has('referenceMeta'));
   assert.ok(stores.get('referenceEntries').indexes.has('kind'));
+});
+
+test('la migration IndexedDB v6 ajoute le statut de carrière terminée aux personnages existants', async () => {
+  const oldCharacter = {
+    id: 'legacy-career-character',
+    identity: { career: 'Soldat', careerId: 'career:soldier', careerCompleted: true }
+  };
+  let migratedCharacter = null;
+  const store = {
+    openCursor() {
+      const request = {};
+      queueMicrotask(() => {
+        request.result = {
+          value: oldCharacter,
+          update(value) { migratedCharacter = value; },
+          continue() {
+            queueMicrotask(() => {
+              request.result = null;
+              request.onsuccess?.();
+            });
+          }
+        };
+        request.onsuccess?.();
+      });
+      return request;
+    }
+  };
+  const database = { objectStoreNames: { contains: (name) => name === 'characters' } };
+  upgradeDatabase(database, { objectStore: () => store }, 6);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(migratedCharacter.schemaVersion, 6);
+  assert.equal(migratedCharacter.identity.careerCompleted, true);
 });
 
 test('la migration depuis une base v1 conserve le magasin characters existant', () => {
@@ -315,10 +367,11 @@ test('la migration v3 conserve les valeurs de personnage et ajoute les identifia
     profile: { notes: 'Notes conservées' }
   };
   const migrated = migrateCharacterRecord(oldCharacter);
-  assert.equal(migrated.schemaVersion, 4);
+  assert.equal(migrated.schemaVersion, 6);
   assert.equal(migrated.identity.careerLevel, 'Recrue');
   assert.equal(migrated.identity.careerLevelId, '');
   assert.equal(migrated.identity.speciesId, '');
+  assert.equal(migrated.identity.careerCompleted, false);
   assert.equal(migrated.profile.notes, 'Notes conservées');
   assert.deepEqual(migrated.skills, []);
   assert.equal(migrated.characteristicAdvances.CC, 0);
@@ -379,4 +432,45 @@ test('les espèces personnalisées conservent particularités, compétences typ�
   assert.equal(typeof preserved[0], 'object');
   assert.equal(preserved[0].skillType, 'advanced');
   assert.equal(preserved[1], 'Discrétion');
+});
+
+test('les coûts de progression ne sont utilisables que si leur vérification et leur source sont renseignées', () => {
+  const career = normalizeReference('careers', {
+    id: 'career-costs', name: 'Éclaireur',
+    skills: [{ name: 'Survie', advancementCost: 30, advancementCostVerified: true, references: ['Livre de règles, p. 120'] }]
+  }, { source: 'custom', packId: null });
+  const skill = { id: 'char-skill-1', name: 'Survie', sourceCareerId: career.id };
+  assert.equal(getSkillAdvancementCost(skill, [career]), 30);
+  const unverified = { name: 'Pistage', advancementCost: 25, advancementCostVerified: true };
+  assert.equal(getSkillAdvancementCost(unverified, []), null);
+  assert.equal(getSkillAdvancementCost({ ...unverified, advancementCostReference: 'Livre, p. 44' }, []), 25);
+
+  const talentReference = normalizeReference('talents', {
+    id: 'talent-costs', name: 'Œil perçant', advancementCost: 50,
+    advancementCostVerified: true, references: ['Livre de règles, p. 130']
+  }, { source: 'custom', packId: null });
+  assert.equal(talentReference.advancementCost, 50);
+  assert.equal(getTalentAdvancementCost({ id: 'char-talent', referenceId: talentReference.id, name: 'Œil perçant' }, [talentReference]), 50);
+  const secondTalent = normalizeReference('talents', {
+    id: 'another-talent', name: 'Œil perçant', advancementCost: 60,
+    advancementCostVerified: true, references: ['Livre, p. 131']
+  }, { source: 'custom', packId: null });
+  assert.equal(getTalentAdvancementCost({ id: 'char-talent', name: 'Œil perçant' }, [talentReference, secondTalent]), null);
+});
+
+test('la migration de personnage met à jour le schéma sans perdre les gains XP anciens', () => {
+  const migrated = migrateCharacterRecord({
+    id: 'old-xp-character', schemaVersion: 4,
+    experience: { total: 850, spent: 900, history: [{ id: 'old-buy', type: 'purchase', amount: 100, note: 'Achat ancien' }] },
+    skills: [{ id: 'legacy-skill', name: 'Esquive', advances: 3 }],
+    talents: [{ id: 'legacy-talent', name: 'Réflexes', rank: 2 }],
+    profile: { notes: 'Conservées' }
+  });
+  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.experience.total, 850);
+  assert.equal(migrated.experience.spent, 900);
+  assert.equal(migrated.experience.history[0].id, 'old-buy');
+  assert.equal(migrated.skills[0].advances, 3);
+  assert.equal(migrated.talents[0].rank, 2);
+  assert.equal(migrated.profile.notes, 'Conservées');
 });

@@ -8,29 +8,38 @@ function openDatabase() {
   }
   if (databasePromise) return databasePromise;
 
-  databasePromise = new Promise((resolve, reject) => {
+  let opening;
+  let wasBlocked = false;
+  opening = new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = (event) => {
       upgradeDatabase(request.result, request.transaction, event.oldVersion);
     };
     request.onsuccess = () => {
       const database = request.result;
+      if (wasBlocked) {
+        database.close();
+        return;
+      }
       database.onversionchange = () => {
         database.close();
-        databasePromise = undefined;
+        if (databasePromise === opening) databasePromise = undefined;
       };
       resolve(database);
     };
     request.onerror = () => {
-      databasePromise = undefined;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(request.error || new Error('Impossible d’ouvrir la base locale.'));
     };
     request.onblocked = () => {
+      wasBlocked = true;
+      if (databasePromise === opening) databasePromise = undefined;
       reject(new Error('La base locale est utilisée par un autre onglet. Fermez les autres onglets de l’application.'));
     };
   });
 
-  return databasePromise;
+  databasePromise = opening;
+  return opening;
 }
 
 function runTransaction(storeNames, mode, operation) {
@@ -63,6 +72,23 @@ export function getCharacter(id) {
 
 export function saveCharacter(character) {
   return runTransaction('characters', 'readwrite', (store) => store.put(character)).then(() => character);
+}
+
+/** Enregistre un lot de fiches dans une seule transaction atomique. */
+export function saveCharacters(characters) {
+  if (!Array.isArray(characters)) throw new TypeError('Les personnages à enregistrer doivent former un tableau.');
+  const ids = new Set();
+  for (const character of characters) {
+    if (!character || typeof character !== 'object' || Array.isArray(character)
+      || typeof character.id !== 'string' || !character.id.trim()) {
+      throw new TypeError('Chaque personnage doit posséder un identifiant valide.');
+    }
+    if (ids.has(character.id)) throw new Error(`Identifiant de personnage dupliqué dans le lot : ${character.id}.`);
+    ids.add(character.id);
+  }
+  return runTransaction('characters', 'readwrite', (store) => {
+    characters.forEach((character) => store.put(character));
+  }).then(() => characters);
 }
 
 export function deleteCharacter(id) {
@@ -112,6 +138,20 @@ export function mergeBuiltInCareerLevels(existing, incoming) {
   };
 }
 
+export function mergeBuiltInTalentReferences(existing, incoming) {
+  if (!existing || existing.source !== 'builtin' || incoming?.kind !== 'talents' || existing.id !== incoming.id) return existing;
+  const aliases = [...new Set([...(existing.aliases || []), ...(incoming.aliases || [])])];
+  const references = [...new Set([...(existing.references || []), ...(incoming.references || [])])];
+  const sourceInfo = { ...(existing.sourceInfo || {}) };
+  for (const [key, value] of Object.entries(incoming.sourceInfo || {})) {
+    if (!sourceInfo[key] && value) sourceInfo[key] = value;
+  }
+  const changed = aliases.length !== (existing.aliases || []).length
+    || references.length !== (existing.references || []).length
+    || Object.keys(sourceInfo).some((key) => sourceInfo[key] !== existing.sourceInfo?.[key]);
+  return changed ? { ...existing, aliases, references, sourceInfo } : existing;
+}
+
 export function seedReferenceEntries(entries, metaRecord) {
   return runTransaction(['referenceEntries', 'referenceMeta'], 'readwrite', (stores) => {
     // Les jeux de données intégrés restent append-only. Pour une carrière déjà
@@ -125,7 +165,7 @@ export function seedReferenceEntries(entries, metaRecord) {
           stores.referenceEntries.add(entry);
           return;
         }
-        const merged = mergeBuiltInCareerLevels(existing, entry);
+        const merged = mergeBuiltInTalentReferences(mergeBuiltInCareerLevels(existing, entry), entry);
         if (merged !== existing) stores.referenceEntries.put({ ...merged, updatedAt: metaRecord.updatedAt });
       };
     });

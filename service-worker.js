@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'wcm-shell-';
-const CACHE_VERSION = 'v14';
+const CACHE_VERSION = 'v18';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
@@ -16,6 +16,7 @@ const APP_SHELL = [
   './src/models/character.js',
   './src/rules/characteristic-generator.js',
   './src/rules/character-calculations.js',
+  './src/rules/progression-costs.js',
   './src/database/migrations.js',
   './src/database/indexeddb.js',
   './src/services/import-export.js',
@@ -26,7 +27,6 @@ const APP_SHELL = [
   './src/services/creation-wizard.js',
   './src/utils/format.js',
   './src/views/dashboard.js',
-  './src/views/character-detail.js',
   './src/views/reference-manager.js',
   './data/religions.json',
   './data/deities.json',

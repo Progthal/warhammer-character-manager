@@ -6,7 +6,8 @@ import { renderCharacterDetail } from '../src/views/character-detail.js';
 
 test('une nouvelle fiche possède les sections attendues sans valeurs de règles inventées', () => {
   const character = createCharacter();
-  assert.equal(character.schemaVersion, 4);
+  assert.equal(character.schemaVersion, 6);
+  assert.equal(character.identity.careerCompleted, false);
   assert.equal(character.identity.status, 'Actif');
   assert.equal(character.characteristics.CC, null);
   assert.equal(Object.keys(character.characteristics).length, 10);
@@ -50,9 +51,9 @@ test('les identifiants de référentiel sont ajoutés sans perdre les anciennes 
   assert.equal(levelLinked.identity.careerLevelId, 'builtin:career:soldat:level:1');
 });
 
-test('une dépense supérieure au total ne produit pas un solde négatif', () => {
+test('une dépense supérieure au total conserve un solde XP négatif', () => {
   const character = createCharacter({ experience: { total: 100, spent: 150 } });
-  assert.equal(getExperienceAvailable(character), 0);
+  assert.equal(getExperienceAvailable(character), -50);
 });
 
 test('les exports individuels et complets sont versionnés puis validés', () => {
