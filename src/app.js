@@ -241,10 +241,45 @@ function characteristicEditorMarkup(character) {
       <td><output class="calculated-value" data-stat-current>${stat.current ?? '—'}</output></td>
       <td><output class="calculated-bonus" data-stat-bonus>${stat.bonus ?? '—'}</output></td>
       <td>${nextCost === null ? '<span class="muted-copy">Maximum atteint</span>' : `<button class="table-action" type="button" data-action="purchase-advancement" data-target-type="characteristic" data-target-key="${key}" data-character-id="${escapeHTML(character.id)}">+1 · ${nextCost} XP</button>`}</td>
-      <td>${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="characteristics" data-target-type="characteristic" data-target-key="${key}"><small data-refund-line-total>0 XP</small></label>` : '<span class="muted-copy">—</span>'}</td>
+      <td>${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'characteristic', key: key })}` : '<span class="muted-copy">—</span>'}</td>
     </tr>`;
   }).join('');
-  return `<div class="responsive-table editor-table-wrap"><table class="data-table characteristic-editor-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augm.</th><th>Actuelle</th><th>Bonus</th><th>Acheter</th><th>Rembourser</th></tr></thead><tbody>${rows}</tbody></table></div><div class="refund-actions" data-refund-scope="characteristics" data-character-id="${escapeHTML(character.id)}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="characteristics" data-character-id="${escapeHTML(character.id)}" disabled>Rembourser les augmentations sélectionnées</button></div>`;
+  return `<div class="responsive-table editor-table-wrap"><table class="data-table characteristic-editor-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augm.</th><th>Actuelle</th><th>Bonus</th><th>Acheter</th><th>Rembourser</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+
+function renderRefundAdvancementButton(character, target) {
+  if (!character) return '<span class="muted-copy">—</span>';
+
+  const count = getRefundableProgressionCount(character, target);
+  if (!count) return '<span class="muted-copy">—</span>';
+
+  let amount = 0;
+
+  try {
+    amount = quoteProgressionRefund(character, [
+      { target, amount: 1 }
+    ]).amount;
+  } catch (error) {
+    return '<span class="muted-copy">Indisponible</span>';
+  }
+
+  if (!amount || amount <= 0) {
+    return '<span class="muted-copy">—</span>';
+  }
+
+  const targetAttribute = target.type === 'characteristic'
+    ? `data-target-key="${escapeHTML(target.key)}"`
+    : `data-target-id="${escapeHTML(target.id)}"`;
+
+  return `<button
+    class="table-action"
+    type="button"
+    data-action="refund-one-advancement"
+    data-character-id="${escapeHTML(character.id)}"
+    data-target-type="${target.type}"
+    ${targetAttribute}
+  >↶ +${amount} XP</button>`;
 }
 
 function renderSkillEditorRow(skill = {}, _collection = 'skills', character = null) {
@@ -268,7 +303,7 @@ function renderSkillEditorRow(skill = {}, _collection = 'skills', character = nu
     <label class="inline-check"><input type="checkbox" data-collection-field="career" ${skill.career ? 'checked' : ''}><span>Compétence de carrière</span></label>
     <label class="inline-check"><input type="checkbox" data-collection-field="acquired" ${skill.acquired !== false ? 'checked' : ''}><span>Acquise</span></label>
     ${nextCost !== null ? `<button type="button" class="table-action progression-row-action" data-inline-progression data-action="purchase-advancement" data-character-id="${escapeHTML(character?.id || '')}" data-target-type="skill" data-target-id="${escapeHTML(rowId)}" ${skill.acquired === false ? 'disabled' : ''}>+1 · ${nextCost} XP</button>` : '<span class="muted-copy progression-row-action">Maximum atteint</span>'}
-    ${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="skills" data-target-type="skill" data-target-id="${escapeHTML(rowId)}"><small data-refund-line-total>0 XP</small></label>` : ''}
+    ${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'skill', id: rowId })}` : ''}
     <button type="button" class="icon-button danger-button" data-collection-action="remove" aria-label="Supprimer cette compétence" title="Supprimer">×</button>
   </div>`;
 }
@@ -298,7 +333,7 @@ function renderTalentEditorRow(talent = {}, _collection = 'talents', character =
     <label class="talent-description"><span>Conditions d’acquisition</span><input data-collection-field="conditions" value="${escapeHTML(talent.conditions || '')}" maxlength="2000" placeholder="Non renseignées"></label>
     <label class="talent-description"><span>Référence de règle pour l’effet</span><input data-collection-field="effectReference" value="${escapeHTML(effect.reference || '')}" maxlength="500" placeholder="Livre, page, errata…"></label>
     ${!hasMaximumRank && nextCost !== null ? `<button type="button" class="table-action progression-row-action" data-inline-progression data-action="purchase-advancement" data-character-id="${escapeHTML(character?.id || '')}" data-target-type="talent" data-target-id="${escapeHTML(rowId)}" ${requiresPrerequisiteVerification && talent.prerequisitesVerified !== true ? 'disabled' : ''}>${talent.acquired === false ? 'Acquérir' : 'Rang suivant'} · ${nextCost} XP</button>` : '<span class="muted-copy progression-row-action">Rang maximum atteint</span>'}
-    ${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="talents" data-target-type="talent" data-target-id="${escapeHTML(rowId)}"><small data-refund-line-total>0 XP</small></label>` : ''}
+    ${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'talent', id: rowId })}` : ''}
     <button type="button" class="icon-button danger-button" data-collection-action="remove" aria-label="Supprimer ce talent" title="Supprimer">×</button>
   </div>`;
 }
@@ -372,7 +407,7 @@ function renderEquipmentEditorRow(item = {}, category = 'possessions') {
 
 function renderCollectionSection(title, collection, entries, rowRenderer, description = '', character = null) {
   const rows = entries.length ? entries.map((entry) => rowRenderer(entry, collection, character)).join('') : '<p class="collection-empty">Aucune entrée. Utilisez le bouton pour en ajouter une.</p>';
-  const refundActions = ['skills', 'talents'].includes(collection) ? `<div class="refund-actions" data-refund-scope="${collection}" data-character-id="${escapeHTML(character?.id || '')}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="${collection}" data-character-id="${escapeHTML(character?.id || '')}" disabled>Rembourser la sélection</button></div>` : '';
+  const refundActions = '';
   return `<div class="editor-collection"><div class="editor-collection-heading"><div><h4>${title}</h4>${description ? `<p>${description}</p>` : ''}</div><button type="button" class="button button-outline button-small" data-collection-action="add" data-collection="${collection}">＋ Ajouter</button></div><div class="editor-collection-rows" id="collection-${collection}" data-collection="${collection}">${rows}</div>${refundActions}</div>`;
 }
 
@@ -1763,6 +1798,55 @@ async function refundSelectedProgressions(button) {
   }
 }
 
+
+async function refundOneAdvancement(button) {
+  try {
+    const character = await getCharacterForProgression(
+      button.dataset.characterId || ''
+    );
+
+    if (!character) {
+      throw new Error('Ce personnage est introuvable.');
+    }
+
+    const targetType = button.dataset.targetType;
+
+    const target = targetType === 'characteristic'
+      ? {
+          type: 'characteristic',
+          key: button.dataset.targetKey
+        }
+      : {
+          type: targetType,
+          id: button.dataset.targetId
+        };
+
+    const selections = [{ target, amount: 1 }];
+    const quote = quoteProgressionRefund(character, selections);
+
+    if (quote.count !== 1 || quote.amount <= 0) {
+      throw new Error('Cet avancement ne peut pas être remboursé.');
+    }
+
+    const updated = refundAdvancements(character, selections, {
+      note: `Remboursement individuel : ${targetType}`
+    });
+
+    await persistProgressionUpdate(updated);
+
+    showToast(
+      `Avancement remboursé : +${quote.amount} XP. ` +
+      `Solde : ${getExperienceAvailable(updated)} XP.`
+    );
+
+  } catch (error) {
+    showToast(
+      error.message || 'Impossible de rembourser cet avancement.',
+      'error'
+    );
+  }
+}
+
 async function undoPurchase(requestedId = '') {
   try {
     const character = await getCharacterForProgression(requestedId);
@@ -1805,6 +1889,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'grant-experience') await addExperience(button.dataset.characterId || '');
   if (action === 'correct-experience') await correctExperienceBalance(button.dataset.characterId || '');
   if (action === 'purchase-advancement') await buyAdvancement(button);
+    if (action === 'refund-one-advancement') await refundOneAdvancement(button);
   if (action === 'change-career') await changeCareer(button.dataset.characterId || '');
   if (action === 'refund-selected-progressions') await refundSelectedProgressions(button);
   if (action === 'undo-last-purchase') await undoPurchase(button.dataset.characterId || '');

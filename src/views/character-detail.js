@@ -2,8 +2,43 @@ import { CHARACTERISTICS, getCharacterName, getExperienceAvailable } from '../mo
 import { findCareerLevel, getCareerLevels } from '../services/reference-catalog.js';
 import { escapeHTML, formatDate } from '../utils/format.js';
 import { calculateCharacterSheet } from '../rules/character-calculations.js';
-import { getRefundableProgressionCount } from '../services/progression.js';
+import { getRefundableProgressionCount, quoteProgressionRefund } from '../services/progression.js';
 import { CAREER_CHANGE_COST, getNextAdvancementCost } from '../rules/progression-costs.js';
+
+
+function renderRefundAdvancementButton(character, target) {
+  if (!character) return '<span class="muted-copy">—</span>';
+
+  const count = getRefundableProgressionCount(character, target);
+  if (!count) return '<span class="muted-copy">—</span>';
+
+  let amount = 0;
+
+  try {
+    amount = quoteProgressionRefund(character, [
+      { target, amount: 1 }
+    ]).amount;
+  } catch (error) {
+    return '<span class="muted-copy">Indisponible</span>';
+  }
+
+  if (!amount || amount <= 0) {
+    return '<span class="muted-copy">—</span>';
+  }
+
+  const targetAttribute = target.type === 'characteristic'
+    ? `data-target-key="${escapeHTML(target.key)}"`
+    : `data-target-id="${escapeHTML(target.id)}"`;
+
+  return `<button
+    class="table-action"
+    type="button"
+    data-action="refund-one-advancement"
+    data-character-id="${escapeHTML(character.id)}"
+    data-target-type="${target.type}"
+    ${targetAttribute}
+  >↶ +${amount} XP</button>`;
+}
 
 function valueOrDash(value, suffix = '') {
   return value === null || value === undefined || value === '' ? '—' : `${escapeHTML(value)}${suffix}`;
@@ -62,7 +97,7 @@ export function renderCharacterDetail(character, referenceEntries = []) {
       <td class="calculated-value">${valueOrDash(stat.current)}</td>
       <td class="calculated-bonus">${valueOrDash(stat.bonus)}</td>
       <td>${nextCost !== null ? `<button class="table-action" type="button" data-action="purchase-advancement" data-character-id="${escapeHTML(character.id)}" data-target-type="characteristic" data-target-key="${key}">+1 · ${nextCost} XP</button>` : '<span class="muted-copy">Maximum 20</span>'}</td>
-      <td>${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="characteristics" data-target-type="characteristic" data-target-key="${key}"><small data-refund-line-total>0 XP</small></label>` : '<span class="muted-copy">—</span>'}</td>
+      <td>${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'characteristic', key: key })}` : '<span class="muted-copy">—</span>'}</td>
     </tr>`;
   }).join('');
   const skillRows = calculated.skills.map((skill) => {
@@ -73,7 +108,7 @@ export function renderCharacterDetail(character, referenceEntries = []) {
     <td>${escapeHTML(skill.characteristicLabel)}</td><td>${valueOrDash(skill.base)}</td>
     <td>${skill.advances > 0 ? '+' : ''}${skill.advances}</td><td class="calculated-value">${valueOrDash(skill.total)}</td>
     <td>${skill.acquired !== false && nextCost !== null ? `<button class="table-action" type="button" data-action="purchase-advancement" data-character-id="${escapeHTML(character.id)}" data-target-type="skill" data-target-id="${escapeHTML(skill.id)}">+1 · ${nextCost} XP</button>` : skill.acquired === false ? '<span class="muted-copy">Compétence à acquérir</span>' : '<span class="muted-copy">Maximum 20</span>'}</td>
-    <td>${refundableCount ? `<label class="refund-inline"><span>Rembourser</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="skills" data-target-type="skill" data-target-id="${escapeHTML(skill.id)}"><small data-refund-line-total>0 XP</small></label>` : '<span class="muted-copy">—</span>'}</td>
+    <td>${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'skill', id: skill.id })}` : '<span class="muted-copy">—</span>'}</td>
   </tr>`;
   }).join('');
   const talentCards = (character.talents || []).map((talent) => {
@@ -97,7 +132,7 @@ export function renderCharacterDetail(character, referenceEntries = []) {
       ${canAdvance && (talent.acquired !== false || !((talent.conditions || '').trim() || talent.prerequisites?.length) || talent.prerequisitesVerified === true)
     ? `<button class="table-action" type="button" data-action="purchase-advancement" data-character-id="${escapeHTML(character.id)}" data-target-type="talent" data-target-id="${escapeHTML(talent.id)}">${talent.acquired === false ? 'Acquérir' : 'Acheter le rang suivant'} · ${nextCost} XP</button>`
     : `<small class="muted-copy">${!canAdvance ? `Rang maximal atteint (${talent.maxRank}).` : 'Vérifiez les conditions / prérequis avant acquisition.'}</small>`}
-      ${refundableCount ? `<label class="refund-inline"><span>Rembourser rang(s)</span><input type="number" min="0" max="${refundableCount}" value="0" data-refund-count data-refund-group="talents" data-target-type="talent" data-target-id="${escapeHTML(talent.id)}"><small data-refund-line-total>0 XP</small></label>` : ''}
+      ${refundableCount ? `${renderRefundAdvancementButton(character, { type: 'talent', id: talent.id })}` : ''}
     </article>`;
   }).join('');
   const equipmentGroups = [
@@ -165,16 +200,15 @@ export function renderCharacterDetail(character, referenceEntries = []) {
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">CARACTÉRISTIQUES</div><h2>Caractéristiques principales</h2></div><span class="section-caption">Valeurs actuelles calculées</span></div>
         <div class="responsive-table"><table class="data-table characteristic-data-table"><thead><tr><th>Caractéristique</th><th>Initiale</th><th>Espèce</th><th>Talents</th><th>Augmentations</th><th>Actuelle</th><th>Bonus</th><th>Prochain avancement</th><th>Remboursement</th></tr></thead><tbody>${characteristicRows}</tbody></table></div>
-        <div class="refund-actions" data-refund-scope="characteristics" data-character-id="${escapeHTML(character.id)}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="characteristics" data-character-id="${escapeHTML(character.id)}" disabled>Rembourser les augmentations sélectionnées</button></div>
         <p class="form-hint">Le bonus est le chiffre des dizaines de la valeur actuelle. Les modificateurs d’espèce sont conservés séparément des jets. Un effet de talent doit être structuré, marqué comme vérifié et accompagné de sa référence pour être appliqué.</p>
       </section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">COMPÉTENCES</div><h2>Compétences du personnage</h2></div><span class="section-caption">${calculated.skills.length} compétence(s)</span></div>
-        ${skillRows ? `<div class="responsive-table"><table class="data-table"><thead><tr><th>Compétence</th><th>Carac.</th><th>Base</th><th>Avancements</th><th>Valeur totale</th><th>Progression XP</th><th>Remboursement</th></tr></thead><tbody>${skillRows}</tbody></table></div><div class="refund-actions" data-refund-scope="skills" data-character-id="${escapeHTML(character.id)}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="skills" data-character-id="${escapeHTML(character.id)}" disabled>Rembourser les avancements sélectionnés</button></div>` : '<p class="empty-inline">Aucune compétence n’a encore été ajoutée à cette fiche.</p>'}
+        ${skillRows ? `<div class="responsive-table"><table class="data-table"><thead><tr><th>Compétence</th><th>Carac.</th><th>Base</th><th>Avancements</th><th>Valeur totale</th><th>Progression XP</th><th>Remboursement</th></tr></thead><tbody>${skillRows}</tbody></table></div>` : '<p class="empty-inline">Aucune compétence n’a encore été ajoutée à cette fiche.</p>'}
       </section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">TALENTS</div><h2>Talents et aptitudes</h2></div><span class="section-caption">${(character.talents || []).length} talent(s)</span></div>
-        ${talentCards ? `<div class="collection-grid" data-refund-scope="talents" data-character-id="${escapeHTML(character.id)}">${talentCards}</div><div class="refund-actions" data-refund-scope="talents" data-character-id="${escapeHTML(character.id)}"><span>XP à restituer : <strong data-refund-total>0 XP</strong></span><button class="button button-outline button-small" type="button" data-action="refund-selected-progressions" data-refund-group="talents" data-character-id="${escapeHTML(character.id)}" disabled>Rembourser les talents sélectionnés</button></div>` : '<p class="empty-inline">Aucun talent n’a encore été ajouté à cette fiche.</p>'}
+        ${talentCards ? `<div class="collection-grid" data-refund-scope="talents" data-character-id="${escapeHTML(character.id)}">${talentCards}</div>` : '<p class="empty-inline">Aucun talent n’a encore été ajouté à cette fiche.</p>'}
       </section>
 
       <section class="detail-section"><div class="detail-section-heading"><div><div class="eyebrow">RÉSISTANCE ET RESSOURCES</div><h2>Caractéristiques secondaires</h2></div></div><div class="detail-grid detail-grid-small">
