@@ -830,3 +830,16 @@ h1, h2, h3, p { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+
+/* Masquer les flèches des champs AUGM */
+.characteristic-editor-table input[data-stat-advances] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.characteristic-editor-table input[data-stat-advances]::-webkit-inner-spin-button,
+.characteristic-editor-table input[data-stat-advances]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

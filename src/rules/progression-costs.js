@@ -4,6 +4,7 @@ const ADVANCEMENT_BANDS = Object.freeze({
 });
 
 export const TALENT_ACQUISITION_COST = 100;
+export const CAREER_LEVEL_UP_COST = 100;
 export const CAREER_CHANGE_COST = 100;
 export const MAX_PURCHASED_ADVANCEMENTS = 20;
 

@@ -62,20 +62,20 @@ export function findReferenceByLegacyValue(entries, kind, id, label) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-export function renderReferencePicker({ kind, entries, selectedId = '', value = '' }) {
+export function renderReferencePicker({ kind, entries, selectedId = '', value = '', locked = false, lockOnSelection = false }) {
   const config = FIELD_NAMES[kind];
   if (!config) throw new Error(`Sélecteur de référentiel inconnu : ${kind}.`);
   const selected = findReferenceByLegacyValue(entries, kind, selectedId, value);
   const info = selected ? entrySummary(selected) : value ? `Valeur historique conservée : ${value}. Sélectionnez une entrée pour l'associer au référentiel.` : 'Aucune entrée sélectionnée.';
   const listId = `reference-options-${kind}`;
   return `
-    <div class="form-field reference-picker" data-reference-picker="${kind}" data-selected-id="${escapeHTML(selected?.id || '')}">
+    <div class="form-field reference-picker" data-reference-picker="${kind}" data-selected-id="${escapeHTML(selected?.id || '')}" data-locked="${locked ? 'true' : 'false'}" data-lock-on-selection="${lockOnSelection ? 'true' : 'false'}">
       <span>${config.label}</span>
       <input type="hidden" name="${config.id}" data-picker-id value="${escapeHTML(selected?.id || '')}">
       <input type="hidden" name="${config.value}" data-picker-value value="${escapeHTML(selected?.name || value)}">
       <div class="reference-picker-control">
-        <input type="search" class="reference-picker-input" role="combobox" aria-label="${config.label}" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-picker-search autocomplete="off" placeholder="${config.placeholder}" value="${escapeHTML(selected ? selected.name : '')}">
-        <button type="button" class="reference-picker-clear" data-picker-clear aria-label="Effacer ${config.label.toLocaleLowerCase('fr-FR')}" title="Effacer la sélection">×</button>
+        <input type="search" class="reference-picker-input" role="combobox" aria-label="${config.label}" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="${listId}" data-picker-search autocomplete="off" placeholder="${config.placeholder}" value="${escapeHTML(selected ? selected.name : '')}" ${locked ? 'disabled' : ''}>
+        <button type="button" class="reference-picker-clear" data-picker-clear aria-label="Effacer ${config.label.toLocaleLowerCase('fr-FR')}" title="Effacer la sélection" ${locked ? 'disabled' : ''}>×</button>
       </div>
       <div class="reference-picker-list" id="${listId}" role="listbox" hidden></div>
       <p class="reference-picker-info" data-picker-info>${escapeHTML(info)}</p>
@@ -161,6 +161,11 @@ export function mountReferencePickers(root, catalog, { onChange = () => true } =
     if (notify) {
       picker.idInput.dispatchEvent(new Event('change', { bubbles: true }));
       picker.valueInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (entry && picker.wrapper.dataset.lockOnSelection === 'true') {
+      picker.wrapper.dataset.locked = 'true';
+      picker.input.disabled = true;
+      picker.clear.disabled = true;
     }
     return true;
   }

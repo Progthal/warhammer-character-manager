@@ -252,7 +252,7 @@ function cleanExperienceHistory(value) {
     };
     return {
       id: cleanId(source.id),
-      type: ['gain', 'purchase', 'refund', 'undo', 'correction', 'career-change'].includes(source.type) ? source.type : 'gain',
+      type: ['gain', 'purchase', 'refund', 'undo', 'correction', 'career-level-up', 'career-change'].includes(source.type) ? source.type : 'gain',
       amount: cleanExperienceAmount(source.amount),
       count: cleanNumber(source.count),
       unitCost: source.unitCost === null || source.unitCost === undefined ? null : cleanExperienceAmount(source.unitCost),
@@ -264,7 +264,7 @@ function cleanExperienceHistory(value) {
       previousValue: cleanNumber(source.previousValue),
       newValue: cleanNumber(source.newValue),
       reversedEntryId: cleanText(source.reversedEntryId, 120),
-      originalOperationType: ['purchase', 'refund', 'gain', 'correction', 'career-change'].includes(source.originalOperationType) ? source.originalOperationType : '',
+      originalOperationType: ['purchase', 'refund', 'gain', 'correction', 'career-level-up', 'career-change'].includes(source.originalOperationType) ? source.originalOperationType : '',
       xpBefore: Number.isSafeInteger(Number(source.xpBefore)) && Math.abs(Number(source.xpBefore)) <= 1_000_000_000 ? Number(source.xpBefore) : null,
       xpAfter: Number.isSafeInteger(Number(source.xpAfter)) && Math.abs(Number(source.xpAfter)) <= 1_000_000_000 ? Number(source.xpAfter) : null,
       targetChanges: Array.isArray(source.targetChanges) ? source.targetChanges.slice(0, 50).map(cleanChange) : [],

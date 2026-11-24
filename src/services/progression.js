@@ -1,5 +1,6 @@
 import { CHARACTERISTICS, createId, getExperienceAvailable, normalizeCharacter } from '../models/character.js';
-import { CAREER_CHANGE_COST, quoteAdvancementCosts } from '../rules/progression-costs.js';
+import { CAREER_CHANGE_COST, CAREER_LEVEL_UP_COST, quoteAdvancementCosts } from '../rules/progression-costs.js';
+import { findCareerLevel, getCareerLevels } from './reference-catalog.js';
 
 const characteristicKeys = new Set(CHARACTERISTICS.map(({ key }) => key));
 
@@ -9,6 +10,94 @@ function positiveInteger(value, label, maximum = 9999) {
     throw new RangeError(`${label} doit être un entier positif.`);
   }
   return parsed;
+}
+
+function conditionTexts(...values) {
+  return values.flatMap((value) => Array.isArray(value) ? value : value ? [value] : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+}
+
+function resolveCurrentCareerLevel(character, career, levels) {
+  const identity = character.identity;
+  const matchesCareer = career && (identity.careerId
+    ? career.id === identity.careerId
+    : String(career.name || '').trim().toLocaleLowerCase('fr-FR')
+      === String(identity.career || '').trim().toLocaleLowerCase('fr-FR'));
+  if (!matchesCareer) return null;
+  return findCareerLevel(career, identity.careerLevelId, identity.careerLevel)
+    || (!identity.careerLevelId && !identity.careerLevel ? levels[0] || null : null);
+}
+
+/** Évalue la progression vers le niveau suivant à partir du référentiel associé. */
+export function getCareerLevelProgress(input, { career } = {}) {
+  const character = normalizeCharacter(input);
+  const levels = getCareerLevels(career);
+  const currentLevel = resolveCurrentCareerLevel(character, career, levels);
+  const currentIndex = currentLevel ? levels.findIndex((level) => level.id === currentLevel.id) : -1;
+  const nextLevel = currentIndex >= 0 ? levels[currentIndex + 1] || null : null;
+  const blockers = nextLevel
+    ? conditionTexts(nextLevel.entryConditions).map((condition) => `Condition d’accès non vérifiable automatiquement : ${condition}`)
+    : [];
+  const isComplete = levels.length > 0 && currentIndex === levels.length - 1;
+  return {
+    levels,
+    currentLevel,
+    nextLevel,
+    isComplete,
+    canAdvance: Boolean(nextLevel) && blockers.length === 0,
+    blockers
+  };
+}
+
+/** Vérifie automatiquement les prérequis structurés avant un changement de carrière.
+ * Les conditions enregistrées en texte libre bloquent l'opération plutôt que d'être
+ * considérées à tort comme satisfaites.
+ */
+export function getCareerChangeEligibility(input, { currentCareer, targetCareer = null } = {}) {
+  const character = normalizeCharacter(input);
+  const progress = getCareerLevelProgress(character, { career: currentCareer });
+  const blockers = [...progress.blockers];
+
+  if (!currentCareer || !progress.currentLevel) {
+    blockers.push('La carrière ou le niveau actuel ne peut pas être associé au référentiel.');
+  } else if (!progress.isComplete) {
+    blockers.push('Le dernier niveau de la carrière actuelle doit être atteint avant de pouvoir en changer.');
+  }
+
+  const exitConditions = conditionTexts(currentCareer?.exitConditions, progress.currentLevel?.exitConditions);
+  if (exitConditions.length) {
+    blockers.push(`Conditions de sortie en texte libre, non vérifiables automatiquement : ${exitConditions.join(' ; ')}`);
+  }
+
+  let startingLevel = null;
+  if (targetCareer) {
+    if (!targetCareer.id || !targetCareer.name) {
+      blockers.push('Sélectionnez une nouvelle carrière valide.');
+    } else if (targetCareer.id === character.identity.careerId
+      || (!character.identity.careerId && targetCareer.name === character.identity.career)) {
+      blockers.push('La nouvelle carrière doit être différente de la carrière actuelle.');
+    }
+
+    const targetLevels = getCareerLevels(targetCareer);
+    startingLevel = targetLevels[0] || null;
+    if (!startingLevel) {
+      blockers.push('La nouvelle carrière ne possède aucun niveau de départ dans le référentiel.');
+    } else {
+      const entryConditions = conditionTexts(targetCareer.entryConditions, startingLevel.entryConditions);
+      if (entryConditions.length) {
+        blockers.push(`Conditions d’accès en texte libre, non vérifiables automatiquement : ${entryConditions.join(' ; ')}`);
+      }
+    }
+  }
+
+  return {
+    eligible: Boolean(targetCareer) && blockers.length === 0,
+    blockers,
+    currentLevel: progress.currentLevel,
+    startingLevel,
+    isCurrentCareerComplete: progress.isComplete
+  };
 }
 
 function locateProgressionTarget(character, target) {
@@ -349,24 +438,20 @@ export function purchaseAdvancement(input, { target, amount = 1, note = '', now 
   return character;
 }
 
-/** Achat explicite d'un changement de carrière, après validation de l'achèvement. */
-export function purchaseCareerChange(input, { career, level = null, now = new Date().toISOString() } = {}) {
+/** Achat du niveau suivant de la carrière actuelle (100 XP, progression séquentielle). */
+export function purchaseCareerLevel(input, { career, now = new Date().toISOString() } = {}) {
   const character = normalizeCharacter(input);
   const identity = character.identity;
-  if (identity.careerCompleted !== true) {
-    throw new Error('Le changement de carrière est possible uniquement après avoir marqué la carrière actuelle comme terminée.');
+  const progress = getCareerLevelProgress(character, { career });
+  if (!progress.currentLevel) {
+    throw new Error('La carrière et le niveau actuel doivent être associés au référentiel avant de progresser.');
   }
-  if (!String(identity.careerId || identity.career || '').trim()) {
-    throw new Error('Aucune carrière actuelle n’est renseignée pour ce personnage.');
+  if (!progress.nextLevel) {
+    throw new Error('Le dernier niveau de cette carrière est déjà atteint. Vous pouvez changer de carrière.');
   }
-  const nextCareerId = String(career?.id || '').trim();
-  const nextCareerName = String(career?.name || '').trim();
-  if (!nextCareerId || !nextCareerName) throw new Error('Sélectionnez une nouvelle carrière dans le référentiel.');
-  if (nextCareerId === identity.careerId || (!identity.careerId && nextCareerName === identity.career)) {
-    throw new Error('La nouvelle carrière doit être différente de la carrière actuelle.');
-  }
-  if (level && (level.careerId && level.careerId !== nextCareerId)) {
-    throw new Error('Le niveau sélectionné ne correspond pas à la nouvelle carrière.');
+  if (progress.blockers.length) throw new Error(progress.blockers.join(' '));
+  if (character.experience.spent + CAREER_LEVEL_UP_COST > 1_000_000_000) {
+    throw new RangeError('Les dépenses XP dépassent la limite prise en charge.');
   }
 
   const previousCareer = {
@@ -376,17 +461,63 @@ export function purchaseCareerChange(input, { career, level = null, now = new Da
     careerLevel: identity.careerLevel,
     careerCompleted: identity.careerCompleted
   };
+  const isFinalLevel = progress.nextLevel.id === progress.levels.at(-1)?.id;
   const nextCareer = {
-    careerId: nextCareerId,
-    career: nextCareerName,
-    careerLevelId: String(level?.id || ''),
-    careerLevel: String(level?.name || ''),
-    careerCompleted: false
+    ...previousCareer,
+    careerLevelId: progress.nextLevel.id,
+    careerLevel: progress.nextLevel.name,
+    careerCompleted: isFinalLevel
   };
   const xpBefore = getExperienceAvailable(character);
+  Object.assign(identity, nextCareer);
+  character.experience.spent += CAREER_LEVEL_UP_COST;
+  const xpAfter = getExperienceAvailable(character);
+  character.experience.history.push({
+    id: createId(),
+    type: 'career-level-up',
+    amount: CAREER_LEVEL_UP_COST,
+    count: 1,
+    unitCost: CAREER_LEVEL_UP_COST,
+    note: `Progression de carrière : ${previousCareer.careerLevel || progress.currentLevel.name} → ${nextCareer.careerLevel}`,
+    date: now,
+    targetPath: 'identity.careerLevel',
+    targetId: nextCareer.careerLevelId,
+    previousValue: null,
+    newValue: null,
+    reversedEntryId: '',
+    careerChange: { previous: previousCareer, next: nextCareer },
+    xpBefore,
+    xpAfter
+  });
+  character.updatedAt = now;
+  return character;
+}
+
+/** Changement automatique après le dernier niveau et vérification des conditions déclarées. */
+export function purchaseCareerChange(input, { currentCareer, career, now = new Date().toISOString() } = {}) {
+  const character = normalizeCharacter(input);
+  const eligibility = getCareerChangeEligibility(character, { currentCareer, targetCareer: career });
+  if (!eligibility.eligible) throw new Error(eligibility.blockers.join(' '));
+
+  const identity = character.identity;
+  const previousCareer = {
+    careerId: identity.careerId,
+    career: identity.career,
+    careerLevelId: identity.careerLevelId,
+    careerLevel: identity.careerLevel,
+    careerCompleted: identity.careerCompleted
+  };
+  const nextCareer = {
+    careerId: career.id,
+    career: career.name,
+    careerLevelId: eligibility.startingLevel.id,
+    careerLevel: eligibility.startingLevel.name,
+    careerCompleted: false
+  };
   if (character.experience.spent + CAREER_CHANGE_COST > 1_000_000_000) {
     throw new RangeError('Les dépenses XP dépassent la limite prise en charge.');
   }
+  const xpBefore = getExperienceAvailable(character);
   Object.assign(identity, nextCareer);
   character.experience.spent += CAREER_CHANGE_COST;
   const xpAfter = getExperienceAvailable(character);
@@ -399,7 +530,7 @@ export function purchaseCareerChange(input, { career, level = null, now = new Da
     note: `Changement de carrière : ${previousCareer.career} → ${nextCareer.career}`,
     date: now,
     targetPath: 'identity.career',
-    targetId: nextCareerId,
+    targetId: career.id,
     previousValue: null,
     newValue: null,
     reversedEntryId: '',
@@ -445,11 +576,11 @@ export function undoLastPurchase(input, { now = new Date().toISOString() } = {})
   const character = normalizeCharacter(input);
   const reversedIds = reversedOperationIds(character.experience.history);
   const operation = [...character.experience.history].reverse().find((entry) => (
-    ['gain', 'purchase', 'refund', 'correction', 'career-change'].includes(entry.type) && !reversedIds.has(entry.id)
+    ['gain', 'purchase', 'refund', 'correction', 'career-level-up', 'career-change'].includes(entry.type) && !reversedIds.has(entry.id)
   ));
   if (!operation) throw new Error('Aucune opération de progression non annulée n’est disponible dans l’historique.');
 
-  const changes = ['gain', 'career-change'].includes(operation.type)
+  const changes = ['gain', 'career-level-up', 'career-change'].includes(operation.type)
     ? []
     : operation.targetChanges?.length
       ? operation.targetChanges
@@ -468,7 +599,7 @@ export function undoLastPurchase(input, { now = new Date().toISOString() } = {})
     }
     return { target, targetPath: change.targetPath, currentValue: expectedValue, restoreValue, count: change.count };
   });
-  if (['purchase', 'career-change'].includes(operation.type) && character.experience.spent < operation.amount) {
+  if (['purchase', 'career-level-up', 'career-change'].includes(operation.type) && character.experience.spent < operation.amount) {
     throw new Error('Les dépenses XP ne correspondent plus à cet achat ; annulation refusée.');
   }
   if (operation.type === 'gain' && character.experience.total < operation.amount) {
@@ -477,7 +608,7 @@ export function undoLastPurchase(input, { now = new Date().toISOString() } = {})
 
   const xpBefore = getExperienceAvailable(character);
   for (const item of restorations) item.target.set(item.restoreValue);
-  if (operation.type === 'career-change') {
+  if (['career-level-up', 'career-change'].includes(operation.type)) {
     const expected = operation.careerChange?.next;
     const previous = operation.careerChange?.previous;
     if (!expected || !previous
@@ -486,7 +617,7 @@ export function undoLastPurchase(input, { now = new Date().toISOString() } = {})
       || character.identity.careerLevelId !== expected.careerLevelId
       || character.identity.careerLevel !== expected.careerLevel
       || character.identity.careerCompleted !== expected.careerCompleted) {
-      throw new Error('La carrière a changé depuis cette opération. Annulation refusée.');
+      throw new Error('La carrière ou son niveau a changé depuis cette opération. Annulation refusée.');
     }
     Object.assign(character.identity, previous);
     character.experience.spent -= operation.amount;
@@ -508,7 +639,7 @@ export function undoLastPurchase(input, { now = new Date().toISOString() } = {})
       previousValue: item.currentValue,
       newValue: item.restoreValue
     })),
-    careerChange: operation.type === 'career-change'
+    careerChange: ['career-level-up', 'career-change'].includes(operation.type)
       ? { previous: operation.careerChange.next, next: operation.careerChange.previous }
       : null,
     xpBefore, xpAfter
